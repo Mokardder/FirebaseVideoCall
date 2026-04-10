@@ -200,6 +200,16 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    private void rebuildPeerConnectionForNextCall() {
+        pendingRemoteCandidates.clear();
+        if (peerConnection != null) {
+            peerConnection.close();
+        }
+        createPeerConnection();
+        attachLocalTracksToPeerConnection();
+        setStatus("Ready for next offer.");
+    }
+
     private void createAndAddLocalTracks() {
         videoCapturer = createCameraCapturer();
         textureHelper = SurfaceTextureHelper.create("captureThread", eglBase.getEglBaseContext());
@@ -215,6 +225,11 @@ public class MainActivity extends AppCompatActivity {
         localAudioTrack = factory.createAudioTrack("audio0", audioSource);
         localAudioTrack.setEnabled(true);
 
+        attachLocalTracksToPeerConnection();
+    }
+
+    private void attachLocalTracksToPeerConnection() {
+        if (peerConnection == null || localVideoTrack == null || localAudioTrack == null) return;
         List<String> streamIds = new ArrayList<>();
         streamIds.add("stream0");
         peerConnection.addTrack(localVideoTrack, streamIds);
@@ -244,12 +259,24 @@ public class MainActivity extends AppCompatActivity {
         callRef.child("offer").addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
-                if (!snapshot.exists()) return;
-                if (peerConnection.getRemoteDescription() != null) return;
+                if (!snapshot.exists()) {
+                    // Browser removes calls/<id> on hangup. Rebuild so the next call can be answered.
+                    if (peerConnection != null && peerConnection.getRemoteDescription() != null) {
+                        rebuildPeerConnectionForNextCall();
+                    }
+                    return;
+                }
 
                 String type = snapshot.child("type").getValue(String.class);
                 String sdp = snapshot.child("sdp").getValue(String.class);
                 if (type == null || sdp == null) return;
+
+                SessionDescription currentRemote = peerConnection.getRemoteDescription();
+                if (currentRemote != null) {
+                    // Ignore duplicate callbacks for the same offer, but reset for a genuinely new call.
+                    if (sdp.equals(currentRemote.description)) return;
+                    rebuildPeerConnectionForNextCall();
+                }
 
                 SessionDescription offer = new SessionDescription(SessionDescription.Type.fromCanonicalForm(type), sdp);
                 peerConnection.setRemoteDescription(new SdpObserver() {

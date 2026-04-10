@@ -56,7 +56,8 @@ For testing only (tighten before production):
 ## 4) Web app
 
 - Open `web/index.html` through a local static server.
-- Set your Firebase web config in `web/app.js`.
+- This web client is **vanilla JavaScript only** (no Firebase SDK import).
+- Paste your RTDB URL in the `dbUrl` input (for example: `https://YOUR_PROJECT-default-rtdb.firebaseio.com`).
 - Click **Start Call**.
 
 ## 5) Android app

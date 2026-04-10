@@ -3,20 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Web Caller (No Local Video)</title>
+    <title>Web Caller (Vanilla JS)</title>
     <style>
       body { font-family: Arial, sans-serif; max-width: 860px; margin: 2rem auto; }
       video { width: 100%; max-width: 720px; background: #111; border-radius: 8px; }
-      .row { display: flex; gap: .5rem; margin-bottom: 1rem; }
+      .row { display: flex; gap: .5rem; margin-bottom: 1rem; flex-wrap: wrap; }
       input, button { padding: .6rem; }
       #log { white-space: pre-wrap; background: #f6f6f6; padding: .8rem; border-radius: 8px; min-height: 120px; }
     </style>
   </head>
   <body>
-    <h1>Browser Caller (no outgoing video)</h1>
+    <h1>Browser Caller (No local media, Vanilla JS)</h1>
 
     <div class="row">
       <input id="callId" value="demo-call-001" />
+      <input id="dbUrl" value="https://YOUR_PROJECT-default-rtdb.firebaseio.com" style="min-width: 360px" />
+    </div>
+    <div class="row">
       <button id="startBtn">Start Call</button>
       <button id="hangupBtn">Hangup</button>
     </div>
@@ -25,6 +28,6 @@
     <h3>Log</h3>
     <div id="log"></div>
 
-    <script type="module" src="./app.js"></script>
+    <script src="./app.js"></script>
   </body>
 </html>

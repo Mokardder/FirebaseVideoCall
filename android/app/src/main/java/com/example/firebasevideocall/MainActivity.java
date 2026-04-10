@@ -10,6 +10,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import com.google.firebase.FirebaseApp;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
@@ -101,7 +102,13 @@ public class MainActivity extends AppCompatActivity {
                 .setVideoDecoderFactory(new DefaultVideoDecoderFactory(eglBase.getEglBaseContext()))
                 .createPeerConnectionFactory();
 
-        callRef = FirebaseDatabase.getInstance().getReference("calls").child(CALL_ID);
+        FirebaseApp firebaseApp = FirebaseApp.initializeApp(this);
+        if (firebaseApp == null) {
+            setStatus("Firebase init failed. Add google-services.json and google-services plugin.");
+            return;
+        }
+
+        callRef = FirebaseDatabase.getInstance(firebaseApp).getReference("calls").child(CALL_ID);
 
         createPeerConnection();
         createAndAddLocalTracks();

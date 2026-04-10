@@ -32,3 +32,11 @@ plugins {
 - It auto-creates answer.
 - It sends local camera + mic.
 - It ignores remote video rendering by design.
+
+## Firebase initialization crash fix
+
+If you see `Default FirebaseApp is not initialized`, ensure all 3 are in place:
+
+1. `google-services.json` exists in `android/app/`.
+2. Google Services plugin is applied in app module (`id 'com.google.gms.google-services'`).
+3. `FirebaseApp.initializeApp(context)` is called before `FirebaseDatabase.getInstance(...)` if auto-init is not happening in your build variant.

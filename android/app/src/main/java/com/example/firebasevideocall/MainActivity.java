@@ -11,6 +11,7 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.google.firebase.FirebaseApp;
+import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
@@ -108,13 +109,20 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        callRef = FirebaseDatabase.getInstance(firebaseApp).getReference("calls").child(CALL_ID);
+        FirebaseAuth.getInstance(firebaseApp).signInAnonymously().addOnCompleteListener(task -> {
+            if (!task.isSuccessful()) {
+                setStatus("Firebase auth failed. Enable Anonymous auth in Firebase Console.");
+                return;
+            }
 
-        createPeerConnection();
-        createAndAddLocalTracks();
-        listenForOfferAndCandidates();
+            callRef = FirebaseDatabase.getInstance(firebaseApp).getReference("calls").child(CALL_ID);
 
-        setStatus("Waiting for offer on calls/" + CALL_ID + "/offer");
+            createPeerConnection();
+            createAndAddLocalTracks();
+            listenForOfferAndCandidates();
+
+            setStatus("Waiting for offer on calls/" + CALL_ID + "/offer");
+        });
     }
 
     private void createPeerConnection() {

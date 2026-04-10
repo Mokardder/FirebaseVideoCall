@@ -6,6 +6,7 @@
 dependencies {
     implementation platform('com.google.firebase:firebase-bom:34.0.0')
     implementation 'com.google.firebase:firebase-database'
+    implementation 'com.google.firebase:firebase-auth'
 
     // WebRTC (example from maven central mirror builds)
     implementation 'io.github.webrtc-sdk:android:125.6422.02'
@@ -40,3 +41,9 @@ If you see `Default FirebaseApp is not initialized`, ensure all 3 are in place:
 1. `google-services.json` exists in `android/app/`.
 2. Google Services plugin is applied in app module (`id 'com.google.gms.google-services'`).
 3. `FirebaseApp.initializeApp(context)` is called before `FirebaseDatabase.getInstance(...)` if auto-init is not happening in your build variant.
+
+
+## Auth requirement
+
+- Enable Anonymous auth provider in Firebase Console (Authentication -> Sign-in method).
+- This sample signs in anonymously before reading/writing RTDB signaling paths.

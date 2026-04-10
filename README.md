@@ -74,9 +74,9 @@ The web client signs in with **Anonymous Auth** before writing signaling data. I
 
 In both `web/app.js` and `MainActivity.java`, replace:
 
-- `turn:YOUR_TURN_HOST:3478?transport=udp`
-- `username: "YOUR_TURN_USERNAME"`
-- `credential: "YOUR_TURN_PASSWORD"`
+- `turn:a.relay.metered.ca:443?transport=tcp`
+- `username: "83eebabf8b4cce9d5dbcb649"`
+- `credential: "2D7JvfkOQtBdYW3R"`
 
 Use your coturn or managed TURN provider credentials.
 

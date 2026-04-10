@@ -26,12 +26,13 @@
     { urls: "stun:stun.l.google.com:19302" },
     {
       urls: [
-        "turn:YOUR_TURN_HOST:3478?transport=udp",
-        "turn:YOUR_TURN_HOST:3478?transport=tcp",
-        "turns:YOUR_TURN_HOST:5349?transport=tcp",
+        "turn:a.relay.metered.ca:3478?transport=udp",
+        "turn:a.relay.metered.ca:3478?transport=tcp",
+        "turn:a.relay.metered.ca:443?transport=tcp",
+        "turns:a.relay.metered.ca:5349?transport=tcp",
       ],
-      username: "YOUR_TURN_USERNAME",
-      credential: "YOUR_TURN_PASSWORD",
+      username: "83eebabf8b4cce9d5dbcb649",
+      credential: "2D7JvfkOQtBdYW3R",
     },
   ];
 

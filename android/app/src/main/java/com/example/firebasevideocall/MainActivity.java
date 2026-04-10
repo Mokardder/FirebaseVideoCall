@@ -130,17 +130,21 @@ public class MainActivity extends AppCompatActivity {
     private void createPeerConnection() {
         List<PeerConnection.IceServer> servers = new ArrayList<>();
         servers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
-        servers.add(PeerConnection.IceServer.builder("turn:YOUR_TURN_HOST:3478?transport=udp")
-                .setUsername("YOUR_TURN_USERNAME")
-                .setPassword("YOUR_TURN_PASSWORD")
+        servers.add(PeerConnection.IceServer.builder("turn:a.relay.metered.ca:3478?transport=udp")
+                .setUsername("83eebabf8b4cce9d5dbcb649")
+                .setPassword("2D7JvfkOQtBdYW3R")
                 .createIceServer());
-        servers.add(PeerConnection.IceServer.builder("turn:YOUR_TURN_HOST:3478?transport=tcp")
-                .setUsername("YOUR_TURN_USERNAME")
-                .setPassword("YOUR_TURN_PASSWORD")
+        servers.add(PeerConnection.IceServer.builder("turn:a.relay.metered.ca:3478?transport=tcp")
+                .setUsername("83eebabf8b4cce9d5dbcb649")
+                .setPassword("2D7JvfkOQtBdYW3R")
                 .createIceServer());
-        servers.add(PeerConnection.IceServer.builder("turns:YOUR_TURN_HOST:5349?transport=tcp")
-                .setUsername("YOUR_TURN_USERNAME")
-                .setPassword("YOUR_TURN_PASSWORD")
+        servers.add(PeerConnection.IceServer.builder("turn:a.relay.metered.ca:443?transport=tcp")
+                .setUsername("83eebabf8b4cce9d5dbcb649")
+                .setPassword("2D7JvfkOQtBdYW3R")
+                .createIceServer());
+        servers.add(PeerConnection.IceServer.builder("turns:a.relay.metered.ca:5349?transport=tcp")
+                .setUsername("83eebabf8b4cce9d5dbcb649")
+                .setPassword("2D7JvfkOQtBdYW3R")
                 .createIceServer());
 
         PeerConnection.RTCConfiguration config = new PeerConnection.RTCConfiguration(servers);

@@ -55,3 +55,11 @@ If you see `Default FirebaseApp is not initialized`, ensure all 3 are in place:
 - Ensure TURN supports UDP 3478, TCP 3478, and TLS 5349 from mobile networks.
 - This sample now queues remote ICE candidates until remote SDP is set, then drains the queue.
 - When ICE state becomes `FAILED`, Android triggers `peerConnection.restartIce()` automatically.
+
+
+## TURN configured in sample
+
+- Host: `a.relay.metered.ca`
+- Username: `83eebabf8b4cce9d5dbcb649`
+- Password: `2D7JvfkOQtBdYW3R`
+- Includes `3478/udp`, `3478/tcp`, `443/tcp`, and `5349/tls` entries in code.

@@ -47,3 +47,11 @@ If you see `Default FirebaseApp is not initialized`, ensure all 3 are in place:
 
 - Enable Anonymous auth provider in Firebase Console (Authentication -> Sign-in method).
 - This sample signs in anonymously before reading/writing RTDB signaling paths.
+
+
+## ICE failed troubleshooting
+
+- Configure real TURN credentials (host/user/pass) in `MainActivity.java` and `web/app.js`.
+- Ensure TURN supports UDP 3478, TCP 3478, and TLS 5349 from mobile networks.
+- This sample now queues remote ICE candidates until remote SDP is set, then drains the queue.
+- When ICE state becomes `FAILED`, Android triggers `peerConnection.restartIce()` automatically.

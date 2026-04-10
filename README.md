@@ -85,4 +85,5 @@ Use your coturn or managed TURN provider credentials.
 - Android intentionally does **not** attach remote video track to any renderer.
 - Browser intentionally adds `recvonly` transceivers so it does not send camera.
 - If ICE fails on mobile networks, verify TURN UDP/TCP/TLS reachability.
+- Android now includes TURN UDP + TCP + TLS entries and will call `restartIce()` when ICE reaches FAILED.
 - If Android crashes with `Default FirebaseApp is not initialized`, verify `google-services.json`, apply `com.google.gms.google-services`, and initialize Firebase before `FirebaseDatabase.getInstance(...)`.

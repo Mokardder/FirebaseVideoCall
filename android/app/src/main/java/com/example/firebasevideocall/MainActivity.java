@@ -60,6 +60,8 @@ public class MainActivity extends AppCompatActivity {
     private AudioSource audioSource;
     private AudioTrack localAudioTrack;
 
+    private final List<IceCandidate> pendingRemoteCandidates = new ArrayList<>();
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -132,6 +134,14 @@ public class MainActivity extends AppCompatActivity {
                 .setUsername("YOUR_TURN_USERNAME")
                 .setPassword("YOUR_TURN_PASSWORD")
                 .createIceServer());
+        servers.add(PeerConnection.IceServer.builder("turn:YOUR_TURN_HOST:3478?transport=tcp")
+                .setUsername("YOUR_TURN_USERNAME")
+                .setPassword("YOUR_TURN_PASSWORD")
+                .createIceServer());
+        servers.add(PeerConnection.IceServer.builder("turns:YOUR_TURN_HOST:5349?transport=tcp")
+                .setUsername("YOUR_TURN_USERNAME")
+                .setPassword("YOUR_TURN_PASSWORD")
+                .createIceServer());
 
         PeerConnection.RTCConfiguration config = new PeerConnection.RTCConfiguration(servers);
         config.iceTransportsType = PeerConnection.IceTransportsType.ALL;
@@ -143,6 +153,9 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onIceConnectionChange(PeerConnection.IceConnectionState iceConnectionState) {
                 setStatus("ICE: " + iceConnectionState.name());
+                if (iceConnectionState == PeerConnection.IceConnectionState.FAILED) {
+                    peerConnection.restartIce();
+                }
             }
 
             @Override
@@ -235,8 +248,24 @@ public class MainActivity extends AppCompatActivity {
                 if (type == null || sdp == null) return;
 
                 SessionDescription offer = new SessionDescription(SessionDescription.Type.fromCanonicalForm(type), sdp);
-                peerConnection.setRemoteDescription(new SimpleSdpObserver(), offer);
-                createAndSendAnswer();
+                peerConnection.setRemoteDescription(new SdpObserver() {
+                    @Override
+                    public void onCreateSuccess(SessionDescription sessionDescription) {}
+
+                    @Override
+                    public void onSetSuccess() {
+                        drainPendingRemoteCandidates();
+                        createAndSendAnswer();
+                    }
+
+                    @Override
+                    public void onCreateFailure(String s) {}
+
+                    @Override
+                    public void onSetFailure(String s) {
+                        setStatus("Remote SDP set failed: " + s);
+                    }
+                }, offer);
             }
 
             @Override
@@ -252,7 +281,12 @@ public class MainActivity extends AppCompatActivity {
                 String sdpMid = snapshot.child("sdpMid").getValue(String.class);
                 Integer sdpMLineIndex = snapshot.child("sdpMLineIndex").getValue(Integer.class);
                 if (candidate == null || sdpMid == null || sdpMLineIndex == null) return;
-                peerConnection.addIceCandidate(new IceCandidate(sdpMid, sdpMLineIndex, candidate));
+                IceCandidate remote = new IceCandidate(sdpMid, sdpMLineIndex, candidate);
+                if (peerConnection.getRemoteDescription() == null) {
+                    pendingRemoteCandidates.add(remote);
+                    return;
+                }
+                peerConnection.addIceCandidate(remote);
             }
 
             @Override public void onChildChanged(@NonNull DataSnapshot snapshot, String previousChildName) {}
@@ -260,6 +294,14 @@ public class MainActivity extends AppCompatActivity {
             @Override public void onChildMoved(@NonNull DataSnapshot snapshot, String previousChildName) {}
             @Override public void onCancelled(@NonNull DatabaseError error) {}
         });
+    }
+
+    private void drainPendingRemoteCandidates() {
+        if (peerConnection == null || peerConnection.getRemoteDescription() == null) return;
+        for (IceCandidate c : pendingRemoteCandidates) {
+            peerConnection.addIceCandidate(c);
+        }
+        pendingRemoteCandidates.clear();
     }
 
     private void createAndSendAnswer() {

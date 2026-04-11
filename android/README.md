@@ -62,3 +62,10 @@ If you see `Default FirebaseApp is not initialized`, ensure all 3 are in place:
 - Username: `83eebabf8b4cce9d5dbcb649`
 - Password: `2D7JvfkOQtBdYW3R`
 - Includes `3478/udp`, `3478/tcp`, `443/tcp`, and `5349/tls` entries in code.
+
+
+## Foreground service + lock screen
+
+- `CallForegroundService` keeps call/signaling alive while app is in background or screen is locked.
+- Manifest now includes `FOREGROUND_SERVICE` and `WAKE_LOCK` permissions and service declaration with `foregroundServiceType="camera|microphone"`.
+- `MainActivity` acquires/releases a partial wakelock and starts/stops the service in lifecycle.

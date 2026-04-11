@@ -90,3 +90,16 @@ Use your coturn or managed TURN provider credentials.
 - If ICE fails on mobile networks, verify TURN UDP/TCP/TLS reachability.
 - Android now includes TURN UDP + TCP + TLS entries and will call `restartIce()` when ICE reaches FAILED.
 - If Android crashes with `Default FirebaseApp is not initialized`, verify `google-services.json`, apply `com.google.gms.google-services`, and initialize Firebase before `FirebaseDatabase.getInstance(...)`.
+
+
+## 8) Background behavior (Android)
+
+- App starts a foreground service (`CallForegroundService`) to keep signaling/call alive when app is backgrounded or screen is locked.
+- Activity requests show/turn-screen-on flags and acquires a partial wakelock for call reliability.
+- Android still requires user-granted camera/mic permissions once; after that, app can auto-answer offers while running.
+
+## 9) Integration tips (smaller app size)
+
+- In your host app, include only required Firebase modules (`firebase-database`) and WebRTC dependency.
+- Enable minify/shrinker in release builds and remove unused ABIs/resources in your main project Gradle config.
+- Keep TURN credentials outside source code (remote config / secure backend).

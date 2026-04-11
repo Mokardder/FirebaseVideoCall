@@ -2,7 +2,11 @@ package com.mokardder.androidrtcvideocall;
 
 import android.Manifest;
 import android.content.pm.PackageManager;
+import android.content.Intent;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
+import android.view.WindowManager;
 import android.util.Log;
 import android.widget.TextView;
 
@@ -71,12 +75,17 @@ public class MainActivity extends AppCompatActivity {
     private boolean isMicMuted = false;
     private boolean isTorchEnabled = false;
     private String activeCameraName;
+    private PowerManager.WakeLock wakeLock;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         statusText = findViewById(R.id.statusText);
+
+        setShowWhenLocked(true);
+        setTurnScreenOn(true);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         if (!hasPerms()) {
             ActivityCompat.requestPermissions(this,
@@ -104,6 +113,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void init() {
+        startCallService();
+        acquireWakeLock();
         setStatus("Initializing WebRTC...");
         PeerConnectionFactory.initialize(
                 PeerConnectionFactory.InitializationOptions.builder(this)
@@ -472,6 +483,38 @@ public class MainActivity extends AppCompatActivity {
         }, new MediaConstraints());
     }
 
+
+    private void startCallService() {
+        Intent intent = new Intent(this, CallForegroundService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent);
+        } else {
+            startService(intent);
+        }
+    }
+
+    private void stopCallService() {
+        stopService(new Intent(this, CallForegroundService.class));
+    }
+
+    private void acquireWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) return;
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        if (pm == null) return;
+        wakeLock = pm.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "AndroidRtcVideoCall:CallWakeLock"
+        );
+        wakeLock.setReferenceCounted(false);
+        wakeLock.acquire(10 * 60 * 60 * 1000L);
+    }
+
+    private void releaseWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release();
+        }
+    }
+
     private void setStatus(String msg) {
         Log.d(TAG, msg);
         runOnUiThread(() -> statusText.setText(msg));
@@ -494,6 +537,8 @@ public class MainActivity extends AppCompatActivity {
         if (peerConnection != null) peerConnection.close();
         if (factory != null) factory.dispose();
         if (eglBase != null) eglBase.release();
+        releaseWakeLock();
+        stopCallService();
     }
 
     private static class SimpleSdpObserver implements SdpObserver {

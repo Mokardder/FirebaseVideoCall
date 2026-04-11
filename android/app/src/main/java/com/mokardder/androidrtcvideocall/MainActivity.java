@@ -4,8 +4,6 @@ import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.hardware.Camera;
-import android.hardware.camera2.CameraCharacteristics;
-import android.hardware.camera2.CameraManager;
 import android.os.Bundle;
 import android.util.Log;
 import android.widget.TextView;
@@ -339,7 +337,7 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         } catch (Exception ignored) {
-            // Ignore and fallback to CameraManager path below.
+            // Ignore and continue to next torch strategy.
         }
 
         return false;
@@ -399,30 +397,13 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        if (activeCameraName == null) return;
-
-        CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
-        if (cameraManager == null) return;
-
-        try {
-            CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(activeCameraName);
-            Boolean hasFlash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
-            if (hasFlash == null || !hasFlash) {
-                if (enabled) setStatus("Selected camera has no torch.");
-                return;
-            }
-            cameraManager.setTorchMode(activeCameraName, enabled);
-        } catch (Exception e) {
-            String msg = e.getMessage() == null ? "unknown" : e.getMessage();
-            if (msg.contains("CAMERA_IN_USE")) {
-                Log.w(TAG, "Torch request ignored: camera is in use by active capturer.");
-                return;
-            }
-            setStatus("Torch toggle failed: " + msg);
+        if (enabled) {
+            setStatus("Torch is not supported by this camera backend on this device.");
         }
     }
 
     private void resetPeerConnectionForNextCall() {
+
         setTorchEnabled(false);
         pendingRemoteCandidates.clear();
 

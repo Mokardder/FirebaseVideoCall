@@ -1,7 +1,10 @@
 package com.example.firebasevideocall;
 
 import android.Manifest;
+import android.content.Context;
 import android.content.pm.PackageManager;
+import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CameraManager;
 import android.os.Bundle;
 import android.widget.TextView;
 
@@ -11,7 +14,7 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.google.firebase.FirebaseApp;
-import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.database.ChildEventListener;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
@@ -46,6 +49,9 @@ import java.util.Map;
 public class MainActivity extends AppCompatActivity {
     private static final int REQ_PERMS = 1101;
     private static final String CALL_ID = "demo-call-001";
+    private static final int CAPTURE_WIDTH = 1280;
+    private static final int CAPTURE_HEIGHT = 720;
+    private static final int CAPTURE_FPS = 30;
 
     private TextView statusText;
     private PeerConnectionFactory factory;
@@ -61,6 +67,10 @@ public class MainActivity extends AppCompatActivity {
     private AudioTrack localAudioTrack;
 
     private final List<IceCandidate> pendingRemoteCandidates = new ArrayList<>();
+    private boolean preferFrontCamera = true;
+    private boolean isMicMuted = false;
+    private boolean isTorchEnabled = false;
+    private String activeCameraName;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -111,20 +121,14 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        FirebaseAuth.getInstance(firebaseApp).signInAnonymously().addOnCompleteListener(task -> {
-            if (!task.isSuccessful()) {
-                setStatus("Firebase auth failed. Enable Anonymous auth in Firebase Console.");
-                return;
-            }
+        callRef = FirebaseDatabase.getInstance(firebaseApp).getReference("calls").child(CALL_ID);
 
-            callRef = FirebaseDatabase.getInstance(firebaseApp).getReference("calls").child(CALL_ID);
+        createPeerConnection();
+        createAndAddLocalTracks();
+        listenForOfferAndCandidates();
+        listenForControls();
 
-            createPeerConnection();
-            createAndAddLocalTracks();
-            listenForOfferAndCandidates();
-
-            setStatus("Waiting for offer on calls/" + CALL_ID + "/offer");
-        });
+        setStatus("Waiting for offer on calls/" + CALL_ID + "/offer");
     }
 
     private void createPeerConnection() {
@@ -157,7 +161,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onIceConnectionChange(PeerConnection.IceConnectionState iceConnectionState) {
                 setStatus("ICE: " + iceConnectionState.name());
-                if (iceConnectionState == PeerConnection.IceConnectionState.FAILED) {
+                if (iceConnectionState == PeerConnection.IceConnectionState.FAILED && peerConnection != null) {
                     peerConnection.restartIce();
                 }
             }
@@ -206,7 +210,7 @@ public class MainActivity extends AppCompatActivity {
 
         videoSource = factory.createVideoSource(false);
         videoCapturer.initialize(textureHelper, getApplicationContext(), videoSource.getCapturerObserver());
-        videoCapturer.startCapture(1280, 720, 30);
+        videoCapturer.startCapture(CAPTURE_WIDTH, CAPTURE_HEIGHT, CAPTURE_FPS);
 
         localVideoTrack = factory.createVideoTrack("video0", videoSource);
         localVideoTrack.setEnabled(true);
@@ -226,18 +230,209 @@ public class MainActivity extends AppCompatActivity {
         String[] names = enumerator.getDeviceNames();
 
         for (String n : names) {
-            if (enumerator.isFrontFacing(n)) {
+            if ((preferFrontCamera && enumerator.isFrontFacing(n)) || (!preferFrontCamera && !enumerator.isFrontFacing(n))) {
                 CameraVideoCapturer c = enumerator.createCapturer(n, null);
-                if (c != null) return c;
+                if (c != null) {
+                    activeCameraName = n;
+                    return c;
+                }
             }
         }
+
         for (String n : names) {
-            if (!enumerator.isFrontFacing(n)) {
-                CameraVideoCapturer c = enumerator.createCapturer(n, null);
-                if (c != null) return c;
+            CameraVideoCapturer c = enumerator.createCapturer(n, null);
+            if (c != null) {
+                activeCameraName = n;
+                return c;
             }
         }
         throw new IllegalStateException("No camera found");
+    }
+
+    private void listenForControls() {
+        callRef.child("controls").addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                if (!snapshot.exists()) return;
+
+                String camera = snapshot.child("camera").getValue(String.class);
+                Boolean micMuted = snapshot.child("micMuted").getValue(Boolean.class);
+                Boolean torchOn = snapshot.child("torchOn").getValue(Boolean.class);
+
+                if (camera != null) {
+                    boolean nextFront = !"back".equalsIgnoreCase(camera);
+                    if (nextFront != preferFrontCamera) {
+                        preferFrontCamera = nextFront;
+                        switchCamera();
+                    }
+                }
+
+                if (micMuted != null) {
+                    setMicMuted(micMuted);
+                }
+
+                if (torchOn != null) {
+                    setTorchEnabled(torchOn);
+                }
+            }
+
+            @Override
+            public void onCancelled(@NonNull DatabaseError error) {
+                setStatus("Controls listener error: " + error.getMessage());
+            }
+        });
+    }
+
+    private void switchCamera() {
+        if (!(videoCapturer instanceof CameraVideoCapturer)) return;
+        ((CameraVideoCapturer) videoCapturer).switchCamera(new CameraVideoCapturer.CameraSwitchHandler() {
+            @Override
+            public void onCameraSwitchDone(boolean isFrontCamera) {
+                preferFrontCamera = isFrontCamera;
+                findActiveCameraName(isFrontCamera);
+                setStatus("Camera switched to " + (isFrontCamera ? "front" : "back"));
+                if (!isFrontCamera && isTorchEnabled) {
+                    setTorchEnabled(true);
+                }
+            }
+
+            @Override
+            public void onCameraSwitchError(String errorDescription) {
+                setStatus("Camera switch failed: " + errorDescription);
+            }
+        });
+    }
+
+    private void findActiveCameraName(boolean isFront) {
+        Camera2Enumerator enumerator = new Camera2Enumerator(this);
+        for (String n : enumerator.getDeviceNames()) {
+            if ((isFront && enumerator.isFrontFacing(n)) || (!isFront && !enumerator.isFrontFacing(n))) {
+                activeCameraName = n;
+                return;
+            }
+        }
+    }
+
+    private void setMicMuted(boolean muted) {
+        isMicMuted = muted;
+        if (localAudioTrack != null) {
+            localAudioTrack.setEnabled(!isMicMuted);
+        }
+    }
+
+    private boolean trySetTorchThroughCapturer(boolean enabled) {
+        if (videoCapturer == null) return false;
+
+        try {
+            for (java.lang.reflect.Method method : videoCapturer.getClass().getMethods()) {
+                String name = method.getName().toLowerCase();
+                Class<?>[] params = method.getParameterTypes();
+                if ((name.contains("torch") || name.contains("flash"))
+                        && params.length == 1
+                        && (params[0] == boolean.class || params[0] == Boolean.class)) {
+                    method.invoke(videoCapturer, enabled);
+                    setStatus(enabled ? "Torch enabled." : "Torch disabled.");
+                    return true;
+                }
+            }
+        } catch (Exception ignored) {
+            // Ignore and fallback to CameraManager path below.
+        }
+
+        return false;
+    }
+
+    private void setTorchEnabled(boolean enabled) {
+        isTorchEnabled = enabled;
+
+        if (trySetTorchThroughCapturer(enabled)) {
+            return;
+        }
+
+        if (activeCameraName == null) return;
+
+        CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+        if (cameraManager == null) return;
+
+        try {
+            CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(activeCameraName);
+            Boolean hasFlash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+            if (hasFlash == null || !hasFlash) {
+                if (enabled) setStatus("Selected camera has no torch.");
+                return;
+            }
+            cameraManager.setTorchMode(activeCameraName, enabled);
+        } catch (Exception e) {
+            String msg = e.getMessage() == null ? "unknown" : e.getMessage();
+            if (msg.contains("CAMERA_IN_USE")) {
+                applyTorchWithCaptureRestart(enabled);
+                return;
+            }
+            setStatus("Torch toggle failed: " + msg);
+        }
+    }
+
+    private void applyTorchWithCaptureRestart(boolean enabled) {
+        if (videoCapturer == null || activeCameraName == null) {
+            return;
+        }
+
+        CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+        if (cameraManager == null) return;
+
+        try {
+            videoCapturer.stopCapture();
+            cameraManager.setTorchMode(activeCameraName, enabled);
+            videoCapturer.startCapture(CAPTURE_WIDTH, CAPTURE_HEIGHT, CAPTURE_FPS);
+            setStatus(enabled ? "Torch enabled." : "Torch disabled.");
+        } catch (Exception ex) {
+            setStatus("Torch toggle failed: " + (ex.getMessage() == null ? "unknown" : ex.getMessage()));
+            try {
+                videoCapturer.startCapture(CAPTURE_WIDTH, CAPTURE_HEIGHT, CAPTURE_FPS);
+            } catch (Exception ignored) {}
+        }
+    }
+
+
+    private void resetPeerConnectionForNextCall() {
+        setTorchEnabled(false);
+        pendingRemoteCandidates.clear();
+
+        if (peerConnection != null) {
+            peerConnection.close();
+            peerConnection = null;
+        }
+
+        if (videoCapturer != null) {
+            try { videoCapturer.stopCapture(); } catch (InterruptedException ignored) {}
+            videoCapturer.dispose();
+            videoCapturer = null;
+        }
+        if (localVideoTrack != null) {
+            localVideoTrack.dispose();
+            localVideoTrack = null;
+        }
+        if (localAudioTrack != null) {
+            localAudioTrack.dispose();
+            localAudioTrack = null;
+        }
+        if (videoSource != null) {
+            videoSource.dispose();
+            videoSource = null;
+        }
+        if (audioSource != null) {
+            audioSource.dispose();
+            audioSource = null;
+        }
+        if (textureHelper != null) {
+            textureHelper.dispose();
+            textureHelper = null;
+        }
+
+        createPeerConnection();
+        createAndAddLocalTracks();
+        setMicMuted(isMicMuted);
+        setTorchEnabled(isTorchEnabled);
     }
 
     private void listenForOfferAndCandidates() {
@@ -245,7 +440,11 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 if (!snapshot.exists()) return;
-                if (peerConnection.getRemoteDescription() != null) return;
+                if (peerConnection == null) return;
+
+                if (peerConnection.getRemoteDescription() != null) {
+                    resetPeerConnectionForNextCall();
+                }
 
                 String type = snapshot.child("type").getValue(String.class);
                 String sdp = snapshot.child("sdp").getValue(String.class);
@@ -278,7 +477,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        callRef.child("candidates").child("browser").addChildEventListener(new com.google.firebase.database.ChildEventListener() {
+        callRef.child("candidates").child("browser").addChildEventListener(new ChildEventListener() {
             @Override
             public void onChildAdded(@NonNull DataSnapshot snapshot, String previousChildName) {
                 String candidate = snapshot.child("candidate").getValue(String.class);
@@ -286,6 +485,7 @@ public class MainActivity extends AppCompatActivity {
                 Integer sdpMLineIndex = snapshot.child("sdpMLineIndex").getValue(Integer.class);
                 if (candidate == null || sdpMid == null || sdpMLineIndex == null) return;
                 IceCandidate remote = new IceCandidate(sdpMid, sdpMLineIndex, candidate);
+                if (peerConnection == null) return;
                 if (peerConnection.getRemoteDescription() == null) {
                     pendingRemoteCandidates.add(remote);
                     return;
@@ -333,6 +533,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        setTorchEnabled(false);
         if (videoCapturer != null) {
             try { videoCapturer.stopCapture(); } catch (InterruptedException ignored) {}
             videoCapturer.dispose();

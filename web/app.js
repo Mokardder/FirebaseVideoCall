@@ -9,18 +9,24 @@
 
   firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
-  const auth = firebase.auth();
 
   const remoteVideo = document.getElementById("remoteVideo");
   const callIdInput = document.getElementById("callId");
+  const cameraSelect = document.getElementById("cameraSelect");
   const startBtn = document.getElementById("startBtn");
   const hangupBtn = document.getElementById("hangupBtn");
+  const muteBtn = document.getElementById("muteBtn");
+  const torchBtn = document.getElementById("torchBtn");
   const logView = document.getElementById("log");
 
   let pc = null;
   let remoteStream = null;
   let answerRef = null;
   let androidCandidatesRef = null;
+  let controlsRef = null;
+
+  let micMuted = false;
+  let torchOn = false;
 
   const iceServers = [
     { urls: "stun:stun.l.google.com:19302" },
@@ -40,18 +46,18 @@
     logView.textContent += `${new Date().toISOString()} ${msg}\n`;
   }
 
-  async function ensureSignedIn() {
-    if (auth.currentUser) return auth.currentUser;
+  function setControlButtonsEnabled(enabled) {
+    muteBtn.disabled = !enabled;
+    torchBtn.disabled = !enabled;
+  }
 
-    try {
-      const result = await auth.signInAnonymously();
-      log(`Signed in anonymously: uid=${result.user.uid}`);
-      return result.user;
-    } catch (err) {
-      throw new Error(
-        `Auth failed (${err.code || "unknown"}). Enable Anonymous auth in Firebase Console or relax RTDB rules for testing.`
-      );
-    }
+  async function pushControls() {
+    if (!controlsRef) return;
+    await controlsRef.update({
+      camera: cameraSelect.value,
+      micMuted,
+      torchOn,
+    });
   }
 
   function createPeerConnection(callId) {
@@ -89,15 +95,22 @@
     const callId = callIdInput.value.trim();
     if (!callId) throw new Error("Call ID is required.");
 
-    await ensureSignedIn();
     createPeerConnection(callId);
 
     const callRef = db.ref(`calls/${callId}`);
+    controlsRef = db.ref(`calls/${callId}/controls`);
     answerRef = db.ref(`calls/${callId}/answer`);
     androidCandidatesRef = db.ref(`calls/${callId}/candidates/android`);
 
     // Clear stale data for same callId.
     await callRef.remove();
+
+    micMuted = false;
+    torchOn = false;
+    muteBtn.textContent = "Mute Mic";
+    torchBtn.textContent = "Torch On";
+
+    await pushControls();
 
     const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
     await pc.setLocalDescription(offer);
@@ -106,6 +119,7 @@
       type: offer.type,
       sdp: offer.sdp,
     });
+    setControlButtonsEnabled(true);
     log("Offer written.");
 
     answerRef.on("value", async (snapshot) => {
@@ -135,6 +149,7 @@
     if (androidCandidatesRef) androidCandidatesRef.off();
     answerRef = null;
     androidCandidatesRef = null;
+    controlsRef = null;
 
     if (pc) {
       pc.close();
@@ -153,6 +168,7 @@
       await db.ref(`calls/${callId}`).remove();
     }
 
+    setControlButtonsEnabled(false);
     log("Hangup + call data removed.");
   }
 
@@ -162,5 +178,21 @@
 
   hangupBtn.addEventListener("click", () => {
     hangup().catch((err) => log(`Hangup failed: ${err.message}`));
+  });
+
+  cameraSelect.addEventListener("change", () => {
+    pushControls().catch((err) => log(`Control update failed: ${err.message}`));
+  });
+
+  muteBtn.addEventListener("click", () => {
+    micMuted = !micMuted;
+    muteBtn.textContent = micMuted ? "Unmute Mic" : "Mute Mic";
+    pushControls().catch((err) => log(`Mic control failed: ${err.message}`));
+  });
+
+  torchBtn.addEventListener("click", () => {
+    torchOn = !torchOn;
+    torchBtn.textContent = torchOn ? "Torch Off" : "Torch On";
+    pushControls().catch((err) => log(`Torch control failed: ${err.message}`));
   });
 })();

@@ -1,4 +1,4 @@
-package com.example.firebasevideocall;
+package com.mokardder.androidrtcvideocall;
 
 import android.Manifest;
 import android.content.Context;
@@ -197,10 +197,10 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onRenegotiationNeeded() {}
 
-            @Override
-            public void onAddTrack(RtpReceiver rtpReceiver, MediaStreamTrack[] mediaStreamTracks) {
-                // Intentionally ignore remote tracks: Android should not display remote video.
-            }
+            // @Override
+            // public void onAddTrack(RtpReceiver rtpReceiver, MediaStreamTrack[] mediaStreamTracks) {
+            //     // Intentionally ignore remote tracks: Android should not display remote video.
+            // }
         });
     }
 

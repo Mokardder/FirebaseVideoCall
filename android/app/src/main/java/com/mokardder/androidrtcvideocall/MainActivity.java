@@ -71,7 +71,7 @@ public class MainActivity extends AppCompatActivity {
     private final List<IceCandidate> pendingRemoteCandidates = new ArrayList<>();
     private boolean preferFrontCamera = true;
     private boolean isMicMuted = false;
-    private boolean isTorchEnabled = false;
+    private boolean isTorchEnabled = true;
     private String activeCameraName;
 
     @Override
@@ -209,6 +209,7 @@ public class MainActivity extends AppCompatActivity {
         videoSource = factory.createVideoSource(false);
         videoCapturer.initialize(textureHelper, getApplicationContext(), videoSource.getCapturerObserver());
         videoCapturer.startCapture(CAPTURE_WIDTH, CAPTURE_HEIGHT, CAPTURE_FPS);
+        setTorchEnabled(isTorchEnabled);
 
         localVideoTrack = factory.createVideoTrack("video0", videoSource);
         localVideoTrack.setEnabled(true);

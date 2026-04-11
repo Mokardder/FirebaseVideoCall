@@ -327,20 +327,47 @@ public class MainActivity extends AppCompatActivity {
     private boolean trySetTorchThroughCapturer(boolean enabled) {
         if (videoCapturer == null) return false;
 
+        java.util.List<java.lang.reflect.Method> methods = new java.util.ArrayList<>();
         try {
-            for (java.lang.reflect.Method method : videoCapturer.getClass().getMethods()) {
-                String name = method.getName().toLowerCase();
+            java.util.Collections.addAll(methods, videoCapturer.getClass().getMethods());
+            java.util.Collections.addAll(methods, videoCapturer.getClass().getDeclaredMethods());
+        } catch (Throwable ignored) {}
+
+        for (java.lang.reflect.Method method : methods) {
+            String name = method.getName().toLowerCase();
+            if (!(name.contains("torch") || name.contains("flash"))) {
+                continue;
+            }
+
+            try {
+                method.setAccessible(true);
                 Class<?>[] params = method.getParameterTypes();
-                if ((name.contains("torch") || name.contains("flash"))
-                        && params.length == 1
-                        && (params[0] == boolean.class || params[0] == Boolean.class)) {
+
+                if (params.length == 1 && (params[0] == boolean.class || params[0] == Boolean.class)) {
                     method.invoke(videoCapturer, enabled);
+                    Log.d(TAG, "Torch method via capturer: " + method.getName() + "(boolean)");
                     setStatus(enabled ? "Torch enabled." : "Torch disabled.");
                     return true;
                 }
+
+                if (params.length == 2
+                        && (params[0] == boolean.class || params[0] == Boolean.class)
+                        && (params[1] == boolean.class || params[1] == Boolean.class)) {
+                    method.invoke(videoCapturer, enabled, false);
+                    Log.d(TAG, "Torch method via capturer: " + method.getName() + "(boolean,boolean)");
+                    setStatus(enabled ? "Torch enabled." : "Torch disabled.");
+                    return true;
+                }
+
+                if (params.length == 0 && enabled) {
+                    method.invoke(videoCapturer);
+                    Log.d(TAG, "Torch method via capturer: " + method.getName() + "()");
+                    setStatus("Torch enabled.");
+                    return true;
+                }
+            } catch (Throwable ignored) {
+                // Try next candidate method.
             }
-        } catch (Exception ignored) {
-            // Ignore and continue to next torch strategy.
         }
 
         return false;

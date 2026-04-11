@@ -24,7 +24,6 @@ import com.google.firebase.database.ValueEventListener;
 import org.webrtc.AudioSource;
 import org.webrtc.AudioTrack;
 import org.webrtc.Camera1Enumerator;
-import org.webrtc.Camera2Enumerator;
 import org.webrtc.CameraEnumerator;
 import org.webrtc.CameraVideoCapturer;
 import org.webrtc.DefaultVideoDecoderFactory;
@@ -222,9 +221,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private CameraEnumerator getCameraEnumerator() {
-        if (Camera2Enumerator.isSupported(this)) {
-            return new Camera2Enumerator(this);
-        }
+        // Force Camera1 capturer for better torch compatibility on many devices.
         return new Camera1Enumerator(true);
     }
 
@@ -368,7 +365,7 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             String msg = e.getMessage() == null ? "unknown" : e.getMessage();
             if (msg.contains("CAMERA_IN_USE")) {
-                setStatus("Torch is not supported while camera capture is active on this device.");
+                setStatus("Torch unavailable with current camera backend. Try switching camera and toggling again.");
                 return;
             }
             setStatus("Torch toggle failed: " + msg);

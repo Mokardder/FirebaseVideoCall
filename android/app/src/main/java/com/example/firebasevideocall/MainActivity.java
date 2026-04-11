@@ -365,34 +365,12 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             String msg = e.getMessage() == null ? "unknown" : e.getMessage();
             if (msg.contains("CAMERA_IN_USE")) {
-                applyTorchWithCaptureRestart(enabled);
+                setStatus("Torch is not supported while camera capture is active on this device.");
                 return;
             }
             setStatus("Torch toggle failed: " + msg);
         }
     }
-
-    private void applyTorchWithCaptureRestart(boolean enabled) {
-        if (videoCapturer == null || activeCameraName == null) {
-            return;
-        }
-
-        CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
-        if (cameraManager == null) return;
-
-        try {
-            videoCapturer.stopCapture();
-            cameraManager.setTorchMode(activeCameraName, enabled);
-            videoCapturer.startCapture(CAPTURE_WIDTH, CAPTURE_HEIGHT, CAPTURE_FPS);
-            setStatus(enabled ? "Torch enabled." : "Torch disabled.");
-        } catch (Exception ex) {
-            setStatus("Torch toggle failed: " + (ex.getMessage() == null ? "unknown" : ex.getMessage()));
-            try {
-                videoCapturer.startCapture(CAPTURE_WIDTH, CAPTURE_HEIGHT, CAPTURE_FPS);
-            } catch (Exception ignored) {}
-        }
-    }
-
 
     private void resetPeerConnectionForNextCall() {
         setTorchEnabled(false);

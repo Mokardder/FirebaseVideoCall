@@ -9,7 +9,6 @@
 
   firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
-  const auth = firebase.auth();
 
   const remoteVideo = document.getElementById("remoteVideo");
   const callIdInput = document.getElementById("callId");
@@ -38,20 +37,6 @@
 
   function log(msg) {
     logView.textContent += `${new Date().toISOString()} ${msg}\n`;
-  }
-
-  async function ensureSignedIn() {
-    if (auth.currentUser) return auth.currentUser;
-
-    try {
-      const result = await auth.signInAnonymously();
-      log(`Signed in anonymously: uid=${result.user.uid}`);
-      return result.user;
-    } catch (err) {
-      throw new Error(
-        `Auth failed (${err.code || "unknown"}). Enable Anonymous auth in Firebase Console or relax RTDB rules for testing.`
-      );
-    }
   }
 
   function createPeerConnection(callId) {
@@ -89,7 +74,6 @@
     const callId = callIdInput.value.trim();
     if (!callId) throw new Error("Call ID is required.");
 
-    await ensureSignedIn();
     createPeerConnection(callId);
 
     const callRef = db.ref(`calls/${callId}`);

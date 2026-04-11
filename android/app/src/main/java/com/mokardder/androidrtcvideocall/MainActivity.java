@@ -371,14 +371,44 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private Camera findCameraInstance(Object root, int depth) {
-        if (root == null || depth > 5) return null;
+        java.util.Set<Object> visited = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        return findCameraInstanceRecursive(root, depth, visited);
+    }
+
+    private Camera findCameraInstanceRecursive(Object root, int depth, java.util.Set<Object> visited) {
+        if (root == null || depth > 10) return null;
         if (root instanceof Camera) return (Camera) root;
+        if (visited.contains(root)) return null;
+        visited.add(root);
+
+        if (root.getClass().isArray()) {
+            int len = java.lang.reflect.Array.getLength(root);
+            for (int i = 0; i < len; i++) {
+                Object item = java.lang.reflect.Array.get(root, i);
+                Camera cam = findCameraInstanceRecursive(item, depth + 1, visited);
+                if (cam != null) return cam;
+            }
+        }
+
+        if (root instanceof java.lang.Iterable<?>) {
+            for (Object item : (java.lang.Iterable<?>) root) {
+                Camera cam = findCameraInstanceRecursive(item, depth + 1, visited);
+                if (cam != null) return cam;
+            }
+        }
+
+        if (root instanceof java.util.Map<?, ?>) {
+            for (Object item : ((java.util.Map<?, ?>) root).values()) {
+                Camera cam = findCameraInstanceRecursive(item, depth + 1, visited);
+                if (cam != null) return cam;
+            }
+        }
 
         for (java.lang.reflect.Field field : root.getClass().getDeclaredFields()) {
             try {
                 field.setAccessible(true);
                 Object value = field.get(root);
-                Camera cam = findCameraInstance(value, depth + 1);
+                Camera cam = findCameraInstanceRecursive(value, depth + 1, visited);
                 if (cam != null) return cam;
             } catch (Throwable ignored) {
                 // keep searching
@@ -389,6 +419,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setTorchEnabled(boolean enabled) {
+
         isTorchEnabled = enabled;
 
         if (trySetTorchThroughCapturer(enabled)) {
@@ -420,7 +451,7 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             String msg = e.getMessage() == null ? "unknown" : e.getMessage();
             if (msg.contains("CAMERA_IN_USE")) {
-                Log.w(TAG, "Torch request ignored: camera is in use by active capturer.");
+                Log.d(TAG, "Torch busy with active capturer; reflection paths were unavailable.");
                 return;
             }
             setStatus("Torch toggle failed: " + msg);

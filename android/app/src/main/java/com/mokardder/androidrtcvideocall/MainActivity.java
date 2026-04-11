@@ -1,4 +1,4 @@
-package com.example.firebasevideocall;
+package com.mokardder.androidrtcvideocall;
 
 import android.Manifest;
 import android.content.Context;
@@ -30,10 +30,8 @@ import org.webrtc.DefaultVideoEncoderFactory;
 import org.webrtc.EglBase;
 import org.webrtc.IceCandidate;
 import org.webrtc.MediaConstraints;
-import org.webrtc.MediaStreamTrack;
 import org.webrtc.PeerConnection;
 import org.webrtc.PeerConnectionFactory;
-import org.webrtc.RtpReceiver;
 import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
 import org.webrtc.SurfaceTextureHelper;
@@ -197,10 +195,6 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onRenegotiationNeeded() {}
 
-            @Override
-            public void onAddTrack(RtpReceiver rtpReceiver, MediaStreamTrack[] mediaStreamTracks) {
-                // Intentionally ignore remote tracks: Android should not display remote video.
-            }
         });
     }
 

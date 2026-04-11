@@ -1,11 +1,7 @@
 package com.mokardder.androidrtcvideocall;
 
 import android.Manifest;
-import android.content.Context;
 import android.content.pm.PackageManager;
-import android.hardware.Camera;
-import android.hardware.camera2.CameraCharacteristics;
-import android.hardware.camera2.CameraManager;
 import android.os.Bundle;
 import android.util.Log;
 import android.widget.TextView;
@@ -25,7 +21,8 @@ import com.google.firebase.database.ValueEventListener;
 
 import org.webrtc.AudioSource;
 import org.webrtc.AudioTrack;
-import org.webrtc.Camera1Enumerator;
+import org.webrtc.FlashlightCameraCapturer;
+import org.webrtc.FlashlightCameraEnumerator;
 import org.webrtc.CameraEnumerator;
 import org.webrtc.CameraVideoCapturer;
 import org.webrtc.DefaultVideoDecoderFactory;
@@ -62,6 +59,7 @@ public class MainActivity extends AppCompatActivity {
     private DatabaseReference callRef;
 
     private VideoCapturer videoCapturer;
+    private FlashlightCameraCapturer flashlightCapturer;
     private SurfaceTextureHelper textureHelper;
     private VideoSource videoSource;
     private VideoTrack localVideoTrack;
@@ -225,8 +223,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private CameraEnumerator getCameraEnumerator() {
-        // Force Camera1 capturer for better torch compatibility on many devices.
-        return new Camera1Enumerator(true);
+        return new FlashlightCameraEnumerator(true);
     }
 
     private VideoCapturer createCameraCapturer() {
@@ -238,6 +235,7 @@ public class MainActivity extends AppCompatActivity {
                 CameraVideoCapturer c = enumerator.createCapturer(n, null);
                 if (c != null) {
                     activeCameraName = n;
+                    if (c instanceof FlashlightCameraCapturer) flashlightCapturer = (FlashlightCameraCapturer) c;
                     return c;
                 }
             }
@@ -247,6 +245,7 @@ public class MainActivity extends AppCompatActivity {
             CameraVideoCapturer c = enumerator.createCapturer(n, null);
             if (c != null) {
                 activeCameraName = n;
+                if (c instanceof FlashlightCameraCapturer) flashlightCapturer = (FlashlightCameraCapturer) c;
                 return c;
             }
         }
@@ -324,199 +323,21 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private boolean trySetTorchThroughCapturer(boolean enabled) {
-        if (videoCapturer == null) return false;
-
-        java.util.List<java.lang.reflect.Method> methods = new java.util.ArrayList<>();
-        try {
-            java.util.Collections.addAll(methods, videoCapturer.getClass().getMethods());
-            java.util.Collections.addAll(methods, videoCapturer.getClass().getDeclaredMethods());
-        } catch (Throwable ignored) {}
-
-        for (java.lang.reflect.Method method : methods) {
-            String name = method.getName().toLowerCase();
-            if (!(name.contains("torch") || name.contains("flash"))) {
-                continue;
-            }
-
-            try {
-                method.setAccessible(true);
-                Class<?>[] params = method.getParameterTypes();
-
-                if (params.length == 1 && (params[0] == boolean.class || params[0] == Boolean.class)) {
-                    method.invoke(videoCapturer, enabled);
-                    Log.d(TAG, "Torch method via capturer: " + method.getName() + "(boolean)");
-                    setStatus(enabled ? "Torch enabled." : "Torch disabled.");
-                    return true;
-                }
-
-                if (params.length == 2
-                        && (params[0] == boolean.class || params[0] == Boolean.class)
-                        && (params[1] == boolean.class || params[1] == Boolean.class)) {
-                    method.invoke(videoCapturer, enabled, false);
-                    Log.d(TAG, "Torch method via capturer: " + method.getName() + "(boolean,boolean)");
-                    setStatus(enabled ? "Torch enabled." : "Torch disabled.");
-                    return true;
-                }
-
-                if (params.length == 0 && enabled) {
-                    method.invoke(videoCapturer);
-                    Log.d(TAG, "Torch method via capturer: " + method.getName() + "()");
-                    setStatus("Torch enabled.");
-                    return true;
-                }
-            } catch (Throwable ignored) {
-                // Try next candidate method.
-            }
-        }
-
-        return false;
-    }
-
-    private boolean trySetTorchThroughCamera1Reflection(boolean enabled) {
-        if (videoCapturer == null) return false;
-
-        try {
-            Camera camera = findCameraInstance(videoCapturer, 0);
-            if (camera == null) return false;
-
-            Camera.Parameters parameters = camera.getParameters();
-            if (parameters == null) return false;
-
-            java.util.List<String> modes = parameters.getSupportedFlashModes();
-            if (modes == null) return false;
-
-            String desired = enabled ? Camera.Parameters.FLASH_MODE_TORCH : Camera.Parameters.FLASH_MODE_OFF;
-            if (!modes.contains(desired)) return false;
-
-            parameters.setFlashMode(desired);
-            camera.setParameters(parameters);
-            setStatus(enabled ? "Torch enabled." : "Torch disabled.");
-            return true;
-        } catch (Exception ignored) {
-            return false;
-        }
-    }
-
-    private Camera findCameraInstance(Object root, int depth) {
-        java.util.Set<Object> visited = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
-        return findCameraInstanceRecursive(root, depth, visited);
-    }
-
-    private Camera findCameraInstanceRecursive(Object root, int depth, java.util.Set<Object> visited) {
-        if (root == null || depth > 10) return null;
-        if (root instanceof Camera) return (Camera) root;
-        if (visited.contains(root)) return null;
-        visited.add(root);
-
-        if (root.getClass().isArray()) {
-            int len = java.lang.reflect.Array.getLength(root);
-            for (int i = 0; i < len; i++) {
-                Object item = java.lang.reflect.Array.get(root, i);
-                Camera cam = findCameraInstanceRecursive(item, depth + 1, visited);
-                if (cam != null) return cam;
-            }
-        }
-
-        if (root instanceof java.lang.Iterable<?>) {
-            for (Object item : (java.lang.Iterable<?>) root) {
-                Camera cam = findCameraInstanceRecursive(item, depth + 1, visited);
-                if (cam != null) return cam;
-            }
-        }
-
-        if (root instanceof java.util.Map<?, ?>) {
-            for (Object item : ((java.util.Map<?, ?>) root).values()) {
-                Camera cam = findCameraInstanceRecursive(item, depth + 1, visited);
-                if (cam != null) return cam;
-            }
-        }
-
-        for (java.lang.reflect.Field field : root.getClass().getDeclaredFields()) {
-            try {
-                field.setAccessible(true);
-                Object value = field.get(root);
-                Camera cam = findCameraInstanceRecursive(value, depth + 1, visited);
-                if (cam != null) return cam;
-            } catch (Throwable ignored) {
-                // keep searching
-            }
-        }
-
-        return null;
-    }
-
     private void setTorchEnabled(boolean enabled) {
-
         isTorchEnabled = enabled;
-
-        if (trySetTorchThroughCapturer(enabled)) {
+        if (flashlightCapturer == null) {
+            if (enabled) setStatus("Torch capturer is not ready yet.");
             return;
         }
 
-        if (trySetTorchThroughCamera1Reflection(enabled)) {
-            return;
-        }
-
-        String cameraId = resolveCamera2IdForTorch();
-        if (cameraId == null) {
-            if (enabled) setStatus("Torch is not available on this device.");
-            return;
-        }
-
-        CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
-        if (cameraManager == null) return;
-
-        try {
-            CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
-            Boolean hasFlash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
-            if (hasFlash == null || !hasFlash) {
-                if (enabled) setStatus("Selected camera has no torch.");
-                return;
-            }
-            cameraManager.setTorchMode(cameraId, enabled);
-            setStatus(enabled ? "Torch enabled." : "Torch disabled.");
-        } catch (Exception e) {
-            String msg = e.getMessage() == null ? "unknown" : e.getMessage();
-            if (msg.contains("CAMERA_IN_USE")) {
-                Log.d(TAG, "Torch busy with active capturer; reflection paths were unavailable.");
-                return;
-            }
-            setStatus("Torch toggle failed: " + msg);
-        }
-    }
-
-    private String resolveCamera2IdForTorch() {
-        CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
-        if (cameraManager == null) return null;
-
-        int desiredFacing = preferFrontCamera
-                ? CameraCharacteristics.LENS_FACING_FRONT
-                : CameraCharacteristics.LENS_FACING_BACK;
-
-        try {
-            String[] cameraIds = cameraManager.getCameraIdList();
-            String fallbackBack = null;
-            for (String id : cameraIds) {
-                CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(id);
-                Integer facing = characteristics.get(CameraCharacteristics.LENS_FACING);
-                Boolean hasFlash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
-
-                if (facing != null && facing == CameraCharacteristics.LENS_FACING_BACK && hasFlash != null && hasFlash) {
-                    fallbackBack = id;
-                }
-
-                if (facing != null && facing == desiredFacing) {
-                    return id;
-                }
-            }
-            return fallbackBack;
-        } catch (Exception ignored) {
-            return null;
+        boolean applied = flashlightCapturer.setFlashlightActive(enabled);
+        if (!applied && enabled) {
+            setStatus("Torch is not supported by current camera/capturer.");
         }
     }
 
     private void resetPeerConnectionForNextCall() {
+
 
 
         setTorchEnabled(false);
@@ -531,6 +352,7 @@ public class MainActivity extends AppCompatActivity {
             try { videoCapturer.stopCapture(); } catch (InterruptedException ignored) {}
             videoCapturer.dispose();
             videoCapturer = null;
+            flashlightCapturer = null;
         }
         if (localVideoTrack != null) {
             localVideoTrack.dispose();
@@ -662,6 +484,7 @@ public class MainActivity extends AppCompatActivity {
         if (videoCapturer != null) {
             try { videoCapturer.stopCapture(); } catch (InterruptedException ignored) {}
             videoCapturer.dispose();
+            flashlightCapturer = null;
         }
         if (localVideoTrack != null) localVideoTrack.dispose();
         if (localAudioTrack != null) localAudioTrack.dispose();

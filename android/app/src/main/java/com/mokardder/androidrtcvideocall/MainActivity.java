@@ -4,6 +4,8 @@ import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.hardware.Camera;
+import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CameraManager;
 import android.os.Bundle;
 import android.util.Log;
 import android.widget.TextView;
@@ -397,12 +399,66 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        if (enabled) {
-            setStatus("Torch is not supported by this camera backend on this device.");
+        String cameraId = resolveCamera2IdForTorch();
+        if (cameraId == null) {
+            if (enabled) setStatus("Torch is not available on this device.");
+            return;
+        }
+
+        CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+        if (cameraManager == null) return;
+
+        try {
+            CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
+            Boolean hasFlash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+            if (hasFlash == null || !hasFlash) {
+                if (enabled) setStatus("Selected camera has no torch.");
+                return;
+            }
+            cameraManager.setTorchMode(cameraId, enabled);
+            setStatus(enabled ? "Torch enabled." : "Torch disabled.");
+        } catch (Exception e) {
+            String msg = e.getMessage() == null ? "unknown" : e.getMessage();
+            if (msg.contains("CAMERA_IN_USE")) {
+                Log.w(TAG, "Torch request ignored: camera is in use by active capturer.");
+                return;
+            }
+            setStatus("Torch toggle failed: " + msg);
+        }
+    }
+
+    private String resolveCamera2IdForTorch() {
+        CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+        if (cameraManager == null) return null;
+
+        int desiredFacing = preferFrontCamera
+                ? CameraCharacteristics.LENS_FACING_FRONT
+                : CameraCharacteristics.LENS_FACING_BACK;
+
+        try {
+            String[] cameraIds = cameraManager.getCameraIdList();
+            String fallbackBack = null;
+            for (String id : cameraIds) {
+                CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(id);
+                Integer facing = characteristics.get(CameraCharacteristics.LENS_FACING);
+                Boolean hasFlash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+
+                if (facing != null && facing == CameraCharacteristics.LENS_FACING_BACK && hasFlash != null && hasFlash) {
+                    fallbackBack = id;
+                }
+
+                if (facing != null && facing == desiredFacing) {
+                    return id;
+                }
+            }
+            return fallbackBack;
+        } catch (Exception ignored) {
+            return null;
         }
     }
 
     private void resetPeerConnectionForNextCall() {
+
 
         setTorchEnabled(false);
         pendingRemoteCandidates.clear();

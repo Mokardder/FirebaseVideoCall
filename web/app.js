@@ -1,12 +1,13 @@
 (() => {
-  const firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_PROJECT.firebaseapp.com",
-    databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
-    projectId: "YOUR_PROJECT",
-    appId: "YOUR_APP_ID",
-  };
-
+const firebaseConfig = {
+  apiKey: "AIzaSyBpO0ReUf7r6QrjX1kMG7Yv0chl-nVuRok",
+  authDomain: "screenshareserver-c7ec1.firebaseapp.com",
+  databaseURL: "https://screenshareserver-c7ec1-default-rtdb.firebaseio.com",
+  projectId: "screenshareserver-c7ec1",
+  storageBucket: "screenshareserver-c7ec1.firebasestorage.app",
+  messagingSenderId: "779415078321",
+  appId: "1:779415078321:web:f07be1fb25e0eea9b32990",
+};
   firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
 

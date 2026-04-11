@@ -46,14 +46,14 @@ For testing only (tighten before production):
 {
   "rules": {
     "calls": {
-      ".read": "auth != null",
-      ".write": "auth != null"
+      ".read": true,
+      ".write": true
     }
   }
 }
 ```
 
-The web client signs in with **Anonymous Auth** before writing signaling data. If you keep `auth != null` rules, enable Anonymous provider in Firebase Console (Authentication -> Sign-in method).
+This sample no longer uses Firebase Authentication. Use explicit path validation and rate limiting before production.
 
 ## 4) Web app
 
@@ -64,11 +64,11 @@ The web client signs in with **Anonymous Auth** before writing signaling data. I
 
 ## 5) Android app
 
-- Add your `google-services.json` and Firebase dependencies (`database` + `auth`).
+- Add your `google-services.json` and Firebase dependencies (`database`).
 - Add camera/microphone permissions.
 - Install app and grant permissions once.
 - App listens to the same `callId` and auto-answers.
-- Enable Anonymous auth provider in Firebase Console (web + Android sample both use it).
+- Before starting a call, choose front/back camera in the Android UI. During call, use in-call controls for mic mute and torch.
 
 ## 6) TURN relay
 

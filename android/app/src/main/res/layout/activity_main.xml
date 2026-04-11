@@ -9,7 +9,50 @@
         android:id="@+id/statusText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Waiting for offer..."
+        android:text="Choose camera and tap Start Call."
         android:textSize="16sp" />
+
+    <RadioGroup
+        android:id="@+id/cameraSelection"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:orientation="horizontal">
+
+        <RadioButton
+            android:id="@+id/frontCameraOption"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            android:text="Front Camera" />
+
+        <RadioButton
+            android:id="@+id/backCameraOption"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:text="Back Camera" />
+    </RadioGroup>
+
+    <Button
+        android:id="@+id/startCallBtn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="Start Call" />
+
+    <Button
+        android:id="@+id/muteMicBtn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="Mute Mic" />
+
+    <Button
+        android:id="@+id/torchBtn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Torch On" />
 
 </LinearLayout>

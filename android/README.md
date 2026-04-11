@@ -31,6 +31,7 @@ plugins {
 - App waits for `calls/demo-call-001/offer`.
 - It auto-creates answer.
 - It sends local camera + mic.
+- It applies browser-provided controls from `calls/{callId}/controls` (camera/mic/torch).
 - It ignores remote video rendering by design.
 
 ## Firebase initialization crash fix
@@ -44,8 +45,8 @@ If you see `Default FirebaseApp is not initialized`, ensure all 3 are in place:
 
 ## Camera and in-call controls
 
-- Before starting a call, choose **Front Camera** or **Back Camera** in the app UI.
-- After the offer is accepted and call is active, use **Mute Mic** and **Torch On/Off** controls.
+- Controls live in the browser caller UI.
+- Android listens to RTDB `controls` and applies camera switch, mic mute, and torch state updates.
 
 ## ICE failed troubleshooting
 

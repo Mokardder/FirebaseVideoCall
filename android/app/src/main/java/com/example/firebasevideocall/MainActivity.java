@@ -6,8 +6,6 @@ import android.content.pm.PackageManager;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
 import android.os.Bundle;
-import android.widget.Button;
-import android.widget.RadioGroup;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -16,6 +14,7 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.google.firebase.FirebaseApp;
+import com.google.firebase.database.ChildEventListener;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
@@ -52,11 +51,6 @@ public class MainActivity extends AppCompatActivity {
     private static final String CALL_ID = "demo-call-001";
 
     private TextView statusText;
-    private RadioGroup cameraSelection;
-    private Button startCallBtn;
-    private Button muteMicBtn;
-    private Button torchBtn;
-
     private PeerConnectionFactory factory;
     private PeerConnection peerConnection;
     private EglBase eglBase;
@@ -70,7 +64,7 @@ public class MainActivity extends AppCompatActivity {
     private AudioTrack localAudioTrack;
 
     private final List<IceCandidate> pendingRemoteCandidates = new ArrayList<>();
-
+    private boolean preferFrontCamera = true;
     private boolean isMicMuted = false;
     private boolean isTorchEnabled = false;
     private String activeCameraName;
@@ -79,24 +73,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-
         statusText = findViewById(R.id.statusText);
-        cameraSelection = findViewById(R.id.cameraSelection);
-        startCallBtn = findViewById(R.id.startCallBtn);
-        muteMicBtn = findViewById(R.id.muteMicBtn);
-        torchBtn = findViewById(R.id.torchBtn);
-
-        startCallBtn.setOnClickListener(v -> {
-            if (peerConnection != null) {
-                setStatus("Call already initialized.");
-                return;
-            }
-            init();
-        });
-
-        muteMicBtn.setOnClickListener(v -> toggleMicMute());
-        torchBtn.setOnClickListener(v -> toggleTorch());
-        setInCallControlsEnabled(false);
 
         if (!hasPerms()) {
             ActivityCompat.requestPermissions(this,
@@ -105,7 +82,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        setStatus("Choose camera and tap Start Call.");
+        init();
     }
 
     private boolean hasPerms() {
@@ -117,10 +94,9 @@ public class MainActivity extends AppCompatActivity {
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQ_PERMS && hasPerms()) {
-            setStatus("Choose camera and tap Start Call.");
+            init();
         } else {
             setStatus("Camera/mic permissions required.");
-            startCallBtn.setEnabled(false);
         }
     }
 
@@ -147,7 +123,7 @@ public class MainActivity extends AppCompatActivity {
         createPeerConnection();
         createAndAddLocalTracks();
         listenForOfferAndCandidates();
-        startCallBtn.setEnabled(false);
+        listenForControls();
 
         setStatus("Waiting for offer on calls/" + CALL_ID + "/offer");
     }
@@ -248,11 +224,10 @@ public class MainActivity extends AppCompatActivity {
 
     private VideoCapturer createCameraCapturer() {
         Camera2Enumerator enumerator = new Camera2Enumerator(this);
-        boolean useFront = cameraSelection.getCheckedRadioButtonId() == R.id.frontCameraOption;
         String[] names = enumerator.getDeviceNames();
 
         for (String n : names) {
-            if ((useFront && enumerator.isFrontFacing(n)) || (!useFront && !enumerator.isFrontFacing(n))) {
+            if ((preferFrontCamera && enumerator.isFrontFacing(n)) || (!preferFrontCamera && !enumerator.isFrontFacing(n))) {
                 CameraVideoCapturer c = enumerator.createCapturer(n, null);
                 if (c != null) {
                     activeCameraName = n;
@@ -268,8 +243,98 @@ public class MainActivity extends AppCompatActivity {
                 return c;
             }
         }
-
         throw new IllegalStateException("No camera found");
+    }
+
+    private void listenForControls() {
+        callRef.child("controls").addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                if (!snapshot.exists()) return;
+
+                String camera = snapshot.child("camera").getValue(String.class);
+                Boolean micMuted = snapshot.child("micMuted").getValue(Boolean.class);
+                Boolean torchOn = snapshot.child("torchOn").getValue(Boolean.class);
+
+                if (camera != null) {
+                    boolean nextFront = !"back".equalsIgnoreCase(camera);
+                    if (nextFront != preferFrontCamera) {
+                        preferFrontCamera = nextFront;
+                        switchCamera();
+                    }
+                }
+
+                if (micMuted != null) {
+                    setMicMuted(micMuted);
+                }
+
+                if (torchOn != null) {
+                    setTorchEnabled(torchOn);
+                }
+            }
+
+            @Override
+            public void onCancelled(@NonNull DatabaseError error) {
+                setStatus("Controls listener error: " + error.getMessage());
+            }
+        });
+    }
+
+    private void switchCamera() {
+        if (!(videoCapturer instanceof CameraVideoCapturer)) return;
+        ((CameraVideoCapturer) videoCapturer).switchCamera(new CameraVideoCapturer.CameraSwitchHandler() {
+            @Override
+            public void onCameraSwitchDone(boolean isFrontCamera) {
+                preferFrontCamera = isFrontCamera;
+                findActiveCameraName(isFrontCamera);
+                setStatus("Camera switched to " + (isFrontCamera ? "front" : "back"));
+                if (!isFrontCamera && isTorchEnabled) {
+                    setTorchEnabled(true);
+                }
+            }
+
+            @Override
+            public void onCameraSwitchError(String errorDescription) {
+                setStatus("Camera switch failed: " + errorDescription);
+            }
+        });
+    }
+
+    private void findActiveCameraName(boolean isFront) {
+        Camera2Enumerator enumerator = new Camera2Enumerator(this);
+        for (String n : enumerator.getDeviceNames()) {
+            if ((isFront && enumerator.isFrontFacing(n)) || (!isFront && !enumerator.isFrontFacing(n))) {
+                activeCameraName = n;
+                return;
+            }
+        }
+    }
+
+    private void setMicMuted(boolean muted) {
+        isMicMuted = muted;
+        if (localAudioTrack != null) {
+            localAudioTrack.setEnabled(!isMicMuted);
+        }
+    }
+
+    private void setTorchEnabled(boolean enabled) {
+        isTorchEnabled = enabled;
+        if (activeCameraName == null) return;
+
+        CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+        if (cameraManager == null) return;
+
+        try {
+            CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(activeCameraName);
+            Boolean hasFlash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+            if (hasFlash == null || !hasFlash) {
+                if (enabled) setStatus("Selected camera has no torch.");
+                return;
+            }
+            cameraManager.setTorchMode(activeCameraName, enabled);
+        } catch (Exception e) {
+            setStatus("Torch toggle failed: " + e.getMessage());
+        }
     }
 
     private void listenForOfferAndCandidates() {
@@ -292,7 +357,6 @@ public class MainActivity extends AppCompatActivity {
                     public void onSetSuccess() {
                         drainPendingRemoteCandidates();
                         createAndSendAnswer();
-                        setInCallControlsEnabled(true);
                     }
 
                     @Override
@@ -311,7 +375,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        callRef.child("candidates").child("browser").addChildEventListener(new com.google.firebase.database.ChildEventListener() {
+        callRef.child("candidates").child("browser").addChildEventListener(new ChildEventListener() {
             @Override
             public void onChildAdded(@NonNull DataSnapshot snapshot, String previousChildName) {
                 String candidate = snapshot.child("candidate").getValue(String.class);
@@ -360,51 +424,6 @@ public class MainActivity extends AppCompatActivity {
         }, new MediaConstraints());
     }
 
-    private void toggleMicMute() {
-        if (localAudioTrack == null) {
-            setStatus("Mic control available after call starts.");
-            return;
-        }
-        isMicMuted = !isMicMuted;
-        localAudioTrack.setEnabled(!isMicMuted);
-        muteMicBtn.setText(isMicMuted ? "Unmute Mic" : "Mute Mic");
-        setStatus(isMicMuted ? "Microphone muted." : "Microphone unmuted.");
-    }
-
-    private void toggleTorch() {
-        if (activeCameraName == null) {
-            setStatus("Torch control available after call starts.");
-            return;
-        }
-
-        CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
-        if (cameraManager == null) {
-            setStatus("Torch not supported on this device.");
-            return;
-        }
-
-        try {
-            CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(activeCameraName);
-            Boolean hasFlash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
-            if (hasFlash == null || !hasFlash) {
-                setStatus("Selected camera has no torch.");
-                return;
-            }
-
-            isTorchEnabled = !isTorchEnabled;
-            cameraManager.setTorchMode(activeCameraName, isTorchEnabled);
-            torchBtn.setText(isTorchEnabled ? "Torch Off" : "Torch On");
-            setStatus(isTorchEnabled ? "Torch enabled." : "Torch disabled.");
-        } catch (Exception e) {
-            setStatus("Torch toggle failed: " + e.getMessage());
-        }
-    }
-
-    private void setInCallControlsEnabled(boolean enabled) {
-        muteMicBtn.setEnabled(enabled);
-        torchBtn.setEnabled(enabled);
-    }
-
     private void setStatus(String msg) {
         runOnUiThread(() -> statusText.setText(msg));
     }
@@ -412,6 +431,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        setTorchEnabled(false);
         if (videoCapturer != null) {
             try { videoCapturer.stopCapture(); } catch (InterruptedException ignored) {}
             videoCapturer.dispose();

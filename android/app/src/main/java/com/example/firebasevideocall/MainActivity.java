@@ -49,6 +49,9 @@ import java.util.Map;
 public class MainActivity extends AppCompatActivity {
     private static final int REQ_PERMS = 1101;
     private static final String CALL_ID = "demo-call-001";
+    private static final int CAPTURE_WIDTH = 1280;
+    private static final int CAPTURE_HEIGHT = 720;
+    private static final int CAPTURE_FPS = 30;
 
     private TextView statusText;
     private PeerConnectionFactory factory;
@@ -207,7 +210,7 @@ public class MainActivity extends AppCompatActivity {
 
         videoSource = factory.createVideoSource(false);
         videoCapturer.initialize(textureHelper, getApplicationContext(), videoSource.getCapturerObserver());
-        videoCapturer.startCapture(1280, 720, 30);
+        videoCapturer.startCapture(CAPTURE_WIDTH, CAPTURE_HEIGHT, CAPTURE_FPS);
 
         localVideoTrack = factory.createVideoTrack("video0", videoSource);
         localVideoTrack.setEnabled(true);
@@ -333,8 +336,76 @@ public class MainActivity extends AppCompatActivity {
             }
             cameraManager.setTorchMode(activeCameraName, enabled);
         } catch (Exception e) {
-            setStatus("Torch toggle failed: " + e.getMessage());
+            String msg = e.getMessage() == null ? "unknown" : e.getMessage();
+            if (msg.contains("CAMERA_IN_USE")) {
+                applyTorchWithCaptureRestart(enabled);
+                return;
+            }
+            setStatus("Torch toggle failed: " + msg);
         }
+    }
+
+    private void applyTorchWithCaptureRestart(boolean enabled) {
+        if (videoCapturer == null || activeCameraName == null) {
+            return;
+        }
+
+        CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+        if (cameraManager == null) return;
+
+        try {
+            videoCapturer.stopCapture();
+            cameraManager.setTorchMode(activeCameraName, enabled);
+            videoCapturer.startCapture(CAPTURE_WIDTH, CAPTURE_HEIGHT, CAPTURE_FPS);
+            setStatus(enabled ? "Torch enabled." : "Torch disabled.");
+        } catch (Exception ex) {
+            setStatus("Torch toggle failed: " + (ex.getMessage() == null ? "unknown" : ex.getMessage()));
+            try {
+                videoCapturer.startCapture(CAPTURE_WIDTH, CAPTURE_HEIGHT, CAPTURE_FPS);
+            } catch (Exception ignored) {}
+        }
+    }
+
+
+    private void resetPeerConnectionForNextCall() {
+        setTorchEnabled(false);
+        pendingRemoteCandidates.clear();
+
+        if (peerConnection != null) {
+            peerConnection.close();
+            peerConnection = null;
+        }
+
+        if (videoCapturer != null) {
+            try { videoCapturer.stopCapture(); } catch (InterruptedException ignored) {}
+            videoCapturer.dispose();
+            videoCapturer = null;
+        }
+        if (localVideoTrack != null) {
+            localVideoTrack.dispose();
+            localVideoTrack = null;
+        }
+        if (localAudioTrack != null) {
+            localAudioTrack.dispose();
+            localAudioTrack = null;
+        }
+        if (videoSource != null) {
+            videoSource.dispose();
+            videoSource = null;
+        }
+        if (audioSource != null) {
+            audioSource.dispose();
+            audioSource = null;
+        }
+        if (textureHelper != null) {
+            textureHelper.dispose();
+            textureHelper = null;
+        }
+
+        createPeerConnection();
+        createAndAddLocalTracks();
+        setMicMuted(isMicMuted);
+        setTorchEnabled(isTorchEnabled);
     }
 
     private void listenForOfferAndCandidates() {
@@ -342,7 +413,11 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 if (!snapshot.exists()) return;
-                if (peerConnection == null || peerConnection.getRemoteDescription() != null) return;
+                if (peerConnection == null) return;
+
+                if (peerConnection.getRemoteDescription() != null) {
+                    resetPeerConnectionForNextCall();
+                }
 
                 String type = snapshot.child("type").getValue(String.class);
                 String sdp = snapshot.child("sdp").getValue(String.class);

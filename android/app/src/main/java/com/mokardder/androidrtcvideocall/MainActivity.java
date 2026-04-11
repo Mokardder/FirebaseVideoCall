@@ -23,7 +23,9 @@ import com.google.firebase.database.ValueEventListener;
 
 import org.webrtc.AudioSource;
 import org.webrtc.AudioTrack;
+import org.webrtc.Camera1Enumerator;
 import org.webrtc.Camera2Enumerator;
+import org.webrtc.CameraEnumerator;
 import org.webrtc.CameraVideoCapturer;
 import org.webrtc.DefaultVideoDecoderFactory;
 import org.webrtc.DefaultVideoEncoderFactory;
@@ -219,8 +221,15 @@ public class MainActivity extends AppCompatActivity {
         peerConnection.addTrack(localAudioTrack, streamIds);
     }
 
+    private CameraEnumerator getCameraEnumerator() {
+        if (Camera2Enumerator.isSupported(this)) {
+            return new Camera2Enumerator(this);
+        }
+        return new Camera1Enumerator(true);
+    }
+
     private VideoCapturer createCameraCapturer() {
-        Camera2Enumerator enumerator = new Camera2Enumerator(this);
+        CameraEnumerator enumerator = getCameraEnumerator();
         String[] names = enumerator.getDeviceNames();
 
         for (String n : names) {
@@ -298,7 +307,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void findActiveCameraName(boolean isFront) {
-        Camera2Enumerator enumerator = new Camera2Enumerator(this);
+        CameraEnumerator enumerator = getCameraEnumerator();
         for (String n : enumerator.getDeviceNames()) {
             if ((isFront && enumerator.isFrontFacing(n)) || (!isFront && !enumerator.isFrontFacing(n))) {
                 activeCameraName = n;

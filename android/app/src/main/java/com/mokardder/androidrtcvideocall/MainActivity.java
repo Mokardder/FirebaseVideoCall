@@ -69,7 +69,7 @@ public class MainActivity extends AppCompatActivity {
     private final List<IceCandidate> pendingRemoteCandidates = new ArrayList<>();
     private boolean preferFrontCamera = true;
     private boolean isMicMuted = false;
-    private boolean isTorchEnabled = true;
+    private boolean isTorchEnabled = false;
     private String activeCameraName;
 
     @Override

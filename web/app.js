@@ -28,7 +28,7 @@
   let controlsRef = null;
 
   let micMuted = false;
-  let torchOn = true;
+  let torchOn = false;
 
   const iceServers = [
     { urls: "stun:stun.l.google.com:19302" },
@@ -108,9 +108,9 @@
     await callRef.remove();
 
     micMuted = false;
-    torchOn = true;
+    torchOn = false;
     muteBtn.textContent = "Mute Mic";
-    torchBtn.textContent = "Torch Off";
+    torchBtn.textContent = "Torch On";
 
     await pushControls();
 

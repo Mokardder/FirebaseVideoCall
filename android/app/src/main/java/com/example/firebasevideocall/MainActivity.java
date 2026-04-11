@@ -3,6 +3,8 @@ package com.example.firebasevideocall;
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -52,6 +54,8 @@ public class MainActivity extends AppCompatActivity {
     private PeerConnection peerConnection;
     private EglBase eglBase;
     private DatabaseReference callRef;
+    private ValueEventListener offerListener;
+    private com.google.firebase.database.ChildEventListener browserCandidatesListener;
 
     private VideoCapturer videoCapturer;
     private SurfaceTextureHelper textureHelper;
@@ -61,6 +65,8 @@ public class MainActivity extends AppCompatActivity {
     private AudioTrack localAudioTrack;
 
     private final List<IceCandidate> pendingRemoteCandidates = new ArrayList<>();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private boolean recoveryScheduled = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -159,6 +165,11 @@ public class MainActivity extends AppCompatActivity {
                 setStatus("ICE: " + iceConnectionState.name());
                 if (iceConnectionState == PeerConnection.IceConnectionState.FAILED) {
                     peerConnection.restartIce();
+                    schedulePeerRecovery("ICE failed");
+                }
+                if (iceConnectionState == PeerConnection.IceConnectionState.DISCONNECTED
+                        || iceConnectionState == PeerConnection.IceConnectionState.CLOSED) {
+                    schedulePeerRecovery("ICE " + iceConnectionState.name().toLowerCase());
                 }
             }
 
@@ -197,6 +208,16 @@ public class MainActivity extends AppCompatActivity {
             public void onAddTrack(RtpReceiver rtpReceiver, MediaStreamTrack[] mediaStreamTracks) {
                 // Intentionally ignore remote tracks: Android should not display remote video.
             }
+
+            @Override
+            public void onConnectionChange(PeerConnection.PeerConnectionState newState) {
+                setStatus("PC: " + newState.name());
+                if (newState == PeerConnection.PeerConnectionState.FAILED
+                        || newState == PeerConnection.PeerConnectionState.DISCONNECTED
+                        || newState == PeerConnection.PeerConnectionState.CLOSED) {
+                    schedulePeerRecovery("PC " + newState.name().toLowerCase());
+                }
+            }
         });
     }
 
@@ -208,6 +229,16 @@ public class MainActivity extends AppCompatActivity {
         createPeerConnection();
         attachLocalTracksToPeerConnection();
         setStatus("Ready for next offer.");
+    }
+
+    private void schedulePeerRecovery(String reason) {
+        if (recoveryScheduled) return;
+        recoveryScheduled = true;
+        setStatus("Recovering call after " + reason + "...");
+        mainHandler.postDelayed(() -> {
+            recoveryScheduled = false;
+            rebuildPeerConnectionForNextCall();
+        }, 1200);
     }
 
     private void createAndAddLocalTracks() {
@@ -256,7 +287,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void listenForOfferAndCandidates() {
-        callRef.child("offer").addValueEventListener(new ValueEventListener() {
+        offerListener = new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 if (!snapshot.exists()) {
@@ -295,6 +326,7 @@ public class MainActivity extends AppCompatActivity {
                     @Override
                     public void onSetFailure(String s) {
                         setStatus("Remote SDP set failed: " + s);
+                        schedulePeerRecovery("remote SDP error");
                     }
                 }, offer);
             }
@@ -302,10 +334,12 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onCancelled(@NonNull DatabaseError error) {
                 setStatus("Offer listener error: " + error.getMessage());
+                schedulePeerRecovery("offer listener error");
             }
-        });
+        };
+        callRef.child("offer").addValueEventListener(offerListener);
 
-        callRef.child("candidates").child("browser").addChildEventListener(new com.google.firebase.database.ChildEventListener() {
+        browserCandidatesListener = new com.google.firebase.database.ChildEventListener() {
             @Override
             public void onChildAdded(@NonNull DataSnapshot snapshot, String previousChildName) {
                 String candidate = snapshot.child("candidate").getValue(String.class);
@@ -317,14 +351,22 @@ public class MainActivity extends AppCompatActivity {
                     pendingRemoteCandidates.add(remote);
                     return;
                 }
-                peerConnection.addIceCandidate(remote);
+                try {
+                    peerConnection.addIceCandidate(remote);
+                } catch (Exception e) {
+                    schedulePeerRecovery("remote candidate error");
+                }
             }
 
             @Override public void onChildChanged(@NonNull DataSnapshot snapshot, String previousChildName) {}
             @Override public void onChildRemoved(@NonNull DataSnapshot snapshot) {}
             @Override public void onChildMoved(@NonNull DataSnapshot snapshot, String previousChildName) {}
-            @Override public void onCancelled(@NonNull DatabaseError error) {}
-        });
+            @Override public void onCancelled(@NonNull DatabaseError error) {
+                setStatus("Candidate listener error: " + error.getMessage());
+                schedulePeerRecovery("candidate listener error");
+            }
+        };
+        callRef.child("candidates").child("browser").addChildEventListener(browserCandidatesListener);
     }
 
     private void drainPendingRemoteCandidates() {
@@ -349,7 +391,10 @@ public class MainActivity extends AppCompatActivity {
 
             @Override public void onSetSuccess() {}
             @Override public void onCreateFailure(String s) { setStatus("Answer create failed: " + s); }
-            @Override public void onSetFailure(String s) { setStatus("Answer set failed: " + s); }
+            @Override public void onSetFailure(String s) {
+                setStatus("Answer set failed: " + s);
+                schedulePeerRecovery("answer set error");
+            }
         }, new MediaConstraints());
     }
 
@@ -360,6 +405,13 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        mainHandler.removeCallbacksAndMessages(null);
+        if (callRef != null && offerListener != null) {
+            callRef.child("offer").removeEventListener(offerListener);
+        }
+        if (callRef != null && browserCandidatesListener != null) {
+            callRef.child("candidates").child("browser").removeEventListener(browserCandidatesListener);
+        }
         if (videoCapturer != null) {
             try { videoCapturer.stopCapture(); } catch (InterruptedException ignored) {}
             videoCapturer.dispose();

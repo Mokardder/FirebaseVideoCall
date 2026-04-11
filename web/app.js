@@ -11,12 +11,16 @@
   const db = firebase.database();
 
   const remoteVideo = document.getElementById("remoteVideo");
+  const localVideo = document.getElementById("localVideo");
   const callIdInput = document.getElementById("callId");
+  const mediaModeSelect = document.getElementById("mediaMode");
+  const flashEnabledInput = document.getElementById("flashEnabled");
   const startBtn = document.getElementById("startBtn");
   const hangupBtn = document.getElementById("hangupBtn");
   const logView = document.getElementById("log");
 
   let pc = null;
+  let localStream = null;
   let remoteStream = null;
   let answerRef = null;
   let androidCandidatesRef = null;
@@ -39,12 +43,78 @@
     logView.textContent += `${new Date().toISOString()} ${msg}\n`;
   }
 
-  function createPeerConnection(callId) {
+  async function maybeApplyTorch(videoTrack, enabled) {
+    if (!videoTrack) return;
+    if (!enabled) return;
+    try {
+      const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : null;
+      if (!capabilities || !capabilities.torch) {
+        log("Torch requested but not supported on this device/camera.");
+        return;
+      }
+      await videoTrack.applyConstraints({ advanced: [{ torch: true }] });
+      log("Torch enabled.");
+    } catch (err) {
+      log(`Torch failed: ${err.message}`);
+    }
+  }
+
+  async function tryGetUserMedia(constraints) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function prepareLocalMedia(mode, flashEnabled) {
+    const wantsVideo = mode !== "audio";
+    if (!wantsVideo) {
+      const audioOnly = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      log("Local mode: audio-only.");
+      return audioOnly;
+    }
+
+    const facingMode = mode === "back" ? { ideal: "environment" } : { ideal: "user" };
+    const fullConstraints = { audio: true, video: { facingMode } };
+
+    try {
+      const full = await navigator.mediaDevices.getUserMedia(fullConstraints);
+      await maybeApplyTorch(full.getVideoTracks()[0], flashEnabled);
+      log(`Local mode: ${mode} camera + audio.`);
+      return full;
+    } catch (err) {
+      // Fallback: if one device is busy/in use, degrade to available media.
+      log(`Full media failed (${err.name || "unknown"}). Trying single-media fallbacks...`);
+      const videoOnly = await tryGetUserMedia({ audio: false, video: { facingMode } });
+      if (videoOnly) {
+        await maybeApplyTorch(videoOnly.getVideoTracks()[0], flashEnabled);
+        log("Microphone appears busy/in use; sending video only.");
+        return videoOnly;
+      }
+
+      const audioOnly = await tryGetUserMedia({ audio: true, video: false });
+      if (audioOnly) {
+        log("Camera appears busy/in use; sending audio only.");
+        return audioOnly;
+      }
+
+      throw err;
+    }
+  }
+
+  function createPeerConnection(callId, stream) {
     pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: "all" });
 
-    // Caller sends no local tracks; receive only.
-    pc.addTransceiver("video", { direction: "recvonly" });
-    pc.addTransceiver("audio", { direction: "recvonly" });
+    const hasVideo = !!stream && stream.getVideoTracks().length > 0;
+    const hasAudio = !!stream && stream.getAudioTracks().length > 0;
+
+    if (hasVideo || hasAudio) {
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+    }
+
+    if (!hasVideo) pc.addTransceiver("video", { direction: "recvonly" });
+    if (!hasAudio) pc.addTransceiver("audio", { direction: "recvonly" });
 
     remoteStream = new MediaStream();
     remoteVideo.srcObject = remoteStream;
@@ -73,8 +143,13 @@
   async function startCall() {
     const callId = callIdInput.value.trim();
     if (!callId) throw new Error("Call ID is required.");
+    const mediaMode = mediaModeSelect.value;
+    const flashEnabled = flashEnabledInput.checked;
 
-    createPeerConnection(callId);
+    localStream = await prepareLocalMedia(mediaMode, flashEnabled);
+    localVideo.srcObject = localStream;
+
+    createPeerConnection(callId, localStream);
 
     const callRef = db.ref(`calls/${callId}`);
     answerRef = db.ref(`calls/${callId}/answer`);
@@ -129,8 +204,13 @@
       remoteStream.getTracks().forEach((t) => t.stop());
       remoteStream = null;
     }
+    if (localStream) {
+      localStream.getTracks().forEach((t) => t.stop());
+      localStream = null;
+    }
 
     remoteVideo.srcObject = null;
+    localVideo.srcObject = null;
 
     const callId = callIdInput.value.trim();
     if (callId) {

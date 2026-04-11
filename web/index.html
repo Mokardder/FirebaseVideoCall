@@ -13,14 +13,21 @@
     </style>
   </head>
   <body>
-    <h1>Browser Caller (No local media, CDN only)</h1>
+    <h1>Browser Caller</h1>
 
     <div class="row">
       <input id="callId" value="demo-call-001" />
+      <select id="mediaMode">
+        <option value="front">Front camera + audio</option>
+        <option value="back">Back camera + audio</option>
+        <option value="audio">Only audio</option>
+      </select>
+      <label><input id="flashEnabled" type="checkbox" /> Flash/Torch</label>
       <button id="startBtn">Start Call</button>
       <button id="hangupBtn">Hangup</button>
     </div>
 
+    <video id="localVideo" autoplay muted playsinline controls></video>
     <video id="remoteVideo" autoplay playsinline controls></video>
     <h3>Log</h3>
     <div id="log"></div>
@@ -28,7 +35,6 @@
     <!-- Firebase via CDN (no npm) -->
     <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

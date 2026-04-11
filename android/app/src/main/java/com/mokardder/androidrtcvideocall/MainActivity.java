@@ -6,6 +6,7 @@ import android.content.pm.PackageManager;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
 import android.os.Bundle;
+import android.util.Log;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -47,6 +48,7 @@ import java.util.Map;
 
 public class MainActivity extends AppCompatActivity {
     private static final int REQ_PERMS = 1101;
+    private static final String TAG = "AndroidRtcVideoCall";
     private static final String CALL_ID = "demo-call-001";
     private static final int CAPTURE_WIDTH = 1280;
     private static final int CAPTURE_HEIGHT = 720;
@@ -365,7 +367,7 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             String msg = e.getMessage() == null ? "unknown" : e.getMessage();
             if (msg.contains("CAMERA_IN_USE")) {
-                setStatus("Torch unavailable with current camera backend. Try switching camera and toggling again.");
+                Log.w(TAG, "Torch request ignored: camera is in use by active capturer.");
                 return;
             }
             setStatus("Torch toggle failed: " + msg);
@@ -505,6 +507,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setStatus(String msg) {
+        Log.d(TAG, msg);
         runOnUiThread(() -> statusText.setText(msg));
     }
 

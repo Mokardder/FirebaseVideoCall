@@ -3,6 +3,7 @@ package com.mokardder.androidrtcvideocall;
 import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.hardware.Camera;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
 import android.os.Bundle;
@@ -344,10 +345,57 @@ public class MainActivity extends AppCompatActivity {
         return false;
     }
 
+    private boolean trySetTorchThroughCamera1Reflection(boolean enabled) {
+        if (videoCapturer == null) return false;
+
+        try {
+            Camera camera = findCameraInstance(videoCapturer, 0);
+            if (camera == null) return false;
+
+            Camera.Parameters parameters = camera.getParameters();
+            if (parameters == null) return false;
+
+            java.util.List<String> modes = parameters.getSupportedFlashModes();
+            if (modes == null) return false;
+
+            String desired = enabled ? Camera.Parameters.FLASH_MODE_TORCH : Camera.Parameters.FLASH_MODE_OFF;
+            if (!modes.contains(desired)) return false;
+
+            parameters.setFlashMode(desired);
+            camera.setParameters(parameters);
+            setStatus(enabled ? "Torch enabled." : "Torch disabled.");
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private Camera findCameraInstance(Object root, int depth) {
+        if (root == null || depth > 5) return null;
+        if (root instanceof Camera) return (Camera) root;
+
+        for (java.lang.reflect.Field field : root.getClass().getDeclaredFields()) {
+            try {
+                field.setAccessible(true);
+                Object value = field.get(root);
+                Camera cam = findCameraInstance(value, depth + 1);
+                if (cam != null) return cam;
+            } catch (Throwable ignored) {
+                // keep searching
+            }
+        }
+
+        return null;
+    }
+
     private void setTorchEnabled(boolean enabled) {
         isTorchEnabled = enabled;
 
         if (trySetTorchThroughCapturer(enabled)) {
+            return;
+        }
+
+        if (trySetTorchThroughCamera1Reflection(enabled)) {
             return;
         }
 

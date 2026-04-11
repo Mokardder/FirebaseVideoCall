@@ -158,6 +158,12 @@
     // Clear stale data for same callId.
     await callRef.remove();
 
+    await db.ref(`calls/${callId}/controls`).set({
+      mediaMode,
+      flashEnabled,
+      updatedAt: Date.now(),
+    });
+
     const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
     await pc.setLocalDescription(offer);
 

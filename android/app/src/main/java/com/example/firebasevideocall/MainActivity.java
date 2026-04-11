@@ -54,6 +54,7 @@ public class MainActivity extends AppCompatActivity {
     private EglBase eglBase;
     private DatabaseReference callRef;
     private ValueEventListener offerListener;
+    private ValueEventListener controlsListener;
     private com.google.firebase.database.ChildEventListener browserCandidatesListener;
 
     private VideoCapturer videoCapturer;
@@ -66,6 +67,8 @@ public class MainActivity extends AppCompatActivity {
     private final List<IceCandidate> pendingRemoteCandidates = new ArrayList<>();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean recoveryScheduled = false;
+    private String desiredMediaMode = "front";
+    private boolean desiredTorchEnabled = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -120,6 +123,7 @@ public class MainActivity extends AppCompatActivity {
 
         createPeerConnection();
         createAndAddLocalTracks();
+        listenForControls();
         listenForOfferAndCandidates();
 
         setStatus("Waiting for offer on calls/" + CALL_ID + "/offer");
@@ -218,8 +222,9 @@ public class MainActivity extends AppCompatActivity {
         if (peerConnection != null) {
             peerConnection.close();
         }
+        releaseLocalTracksAndSources();
         createPeerConnection();
-        attachLocalTracksToPeerConnection();
+        createAndAddLocalTracks();
         setStatus("Ready for next offer.");
     }
 
@@ -234,48 +239,99 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void createAndAddLocalTracks() {
-        videoCapturer = createCameraCapturer();
-        textureHelper = SurfaceTextureHelper.create("captureThread", eglBase.getEglBaseContext());
+        if (!"audio".equals(desiredMediaMode)) {
+            try {
+                videoCapturer = createCameraCapturer("back".equals(desiredMediaMode));
+                textureHelper = SurfaceTextureHelper.create("captureThread", eglBase.getEglBaseContext());
+                videoSource = factory.createVideoSource(false);
+                videoCapturer.initialize(textureHelper, getApplicationContext(), videoSource.getCapturerObserver());
+                videoCapturer.startCapture(1280, 720, 30);
+                localVideoTrack = factory.createVideoTrack("video0", videoSource);
+                localVideoTrack.setEnabled(true);
+            } catch (Exception e) {
+                setStatus("Camera unavailable, continuing with audio only.");
+                releaseVideoOnlyResources();
+            }
+        }
 
-        videoSource = factory.createVideoSource(false);
-        videoCapturer.initialize(textureHelper, getApplicationContext(), videoSource.getCapturerObserver());
-        videoCapturer.startCapture(1280, 720, 30);
+        try {
+            audioSource = factory.createAudioSource(new MediaConstraints());
+            localAudioTrack = factory.createAudioTrack("audio0", audioSource);
+            localAudioTrack.setEnabled(true);
+        } catch (Exception e) {
+            setStatus("Mic unavailable, continuing with video only.");
+            releaseAudioOnlyResources();
+        }
 
-        localVideoTrack = factory.createVideoTrack("video0", videoSource);
-        localVideoTrack.setEnabled(true);
-
-        audioSource = factory.createAudioSource(new MediaConstraints());
-        localAudioTrack = factory.createAudioTrack("audio0", audioSource);
-        localAudioTrack.setEnabled(true);
+        if (desiredTorchEnabled) {
+            setStatus("Torch requested from web, but torch control is not supported by this Android WebRTC capturer.");
+        }
 
         attachLocalTracksToPeerConnection();
     }
 
     private void attachLocalTracksToPeerConnection() {
-        if (peerConnection == null || localVideoTrack == null || localAudioTrack == null) return;
+        if (peerConnection == null) return;
         List<String> streamIds = new ArrayList<>();
         streamIds.add("stream0");
-        peerConnection.addTrack(localVideoTrack, streamIds);
-        peerConnection.addTrack(localAudioTrack, streamIds);
+        if (localVideoTrack != null) peerConnection.addTrack(localVideoTrack, streamIds);
+        if (localAudioTrack != null) peerConnection.addTrack(localAudioTrack, streamIds);
     }
 
-    private VideoCapturer createCameraCapturer() {
+    private VideoCapturer createCameraCapturer(boolean preferBackCamera) {
         Camera2Enumerator enumerator = new Camera2Enumerator(this);
         String[] names = enumerator.getDeviceNames();
 
-        for (String n : names) {
-            if (enumerator.isFrontFacing(n)) {
-                CameraVideoCapturer c = enumerator.createCapturer(n, null);
-                if (c != null) return c;
+        if (preferBackCamera) {
+            for (String n : names) {
+                if (!enumerator.isFrontFacing(n)) {
+                    CameraVideoCapturer c = enumerator.createCapturer(n, null);
+                    if (c != null) return c;
+                }
             }
-        }
-        for (String n : names) {
-            if (!enumerator.isFrontFacing(n)) {
-                CameraVideoCapturer c = enumerator.createCapturer(n, null);
-                if (c != null) return c;
+            for (String n : names) {
+                if (enumerator.isFrontFacing(n)) {
+                    CameraVideoCapturer c = enumerator.createCapturer(n, null);
+                    if (c != null) return c;
+                }
+            }
+        } else {
+            for (String n : names) {
+                if (enumerator.isFrontFacing(n)) {
+                    CameraVideoCapturer c = enumerator.createCapturer(n, null);
+                    if (c != null) return c;
+                }
+            }
+            for (String n : names) {
+                if (!enumerator.isFrontFacing(n)) {
+                    CameraVideoCapturer c = enumerator.createCapturer(n, null);
+                    if (c != null) return c;
+                }
             }
         }
         throw new IllegalStateException("No camera found");
+    }
+
+    private void listenForControls() {
+        controlsListener = new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                String mode = snapshot.child("mediaMode").getValue(String.class);
+                Boolean torch = snapshot.child("flashEnabled").getValue(Boolean.class);
+                if (mode == null) mode = "front";
+                if (!mode.equals("front") && !mode.equals("back") && !mode.equals("audio")) {
+                    mode = "front";
+                }
+                desiredMediaMode = mode;
+                desiredTorchEnabled = Boolean.TRUE.equals(torch);
+            }
+
+            @Override
+            public void onCancelled(@NonNull DatabaseError error) {
+                setStatus("Controls listener error: " + error.getMessage());
+            }
+        };
+        callRef.child("controls").addValueEventListener(controlsListener);
     }
 
     private void listenForOfferAndCandidates() {
@@ -378,7 +434,9 @@ public class MainActivity extends AppCompatActivity {
                 answer.put("type", sessionDescription.type.canonicalForm());
                 answer.put("sdp", sessionDescription.description);
                 callRef.child("answer").setValue(answer);
-                setStatus("Auto-answered. Sending camera+audio.");
+                boolean sendingVideo = localVideoTrack != null;
+                boolean sendingAudio = localAudioTrack != null;
+                setStatus("Auto-answered. Sending video=" + sendingVideo + ", audio=" + sendingAudio);
             }
 
             @Override public void onSetSuccess() {}
@@ -401,21 +459,52 @@ public class MainActivity extends AppCompatActivity {
         if (callRef != null && offerListener != null) {
             callRef.child("offer").removeEventListener(offerListener);
         }
+        if (callRef != null && controlsListener != null) {
+            callRef.child("controls").removeEventListener(controlsListener);
+        }
         if (callRef != null && browserCandidatesListener != null) {
             callRef.child("candidates").child("browser").removeEventListener(browserCandidatesListener);
         }
-        if (videoCapturer != null) {
-            try { videoCapturer.stopCapture(); } catch (InterruptedException ignored) {}
-            videoCapturer.dispose();
-        }
-        if (localVideoTrack != null) localVideoTrack.dispose();
-        if (localAudioTrack != null) localAudioTrack.dispose();
-        if (videoSource != null) videoSource.dispose();
-        if (audioSource != null) audioSource.dispose();
-        if (textureHelper != null) textureHelper.dispose();
+        releaseLocalTracksAndSources();
         if (peerConnection != null) peerConnection.close();
         if (factory != null) factory.dispose();
         if (eglBase != null) eglBase.release();
+    }
+
+    private void releaseVideoOnlyResources() {
+        if (videoCapturer != null) {
+            try { videoCapturer.stopCapture(); } catch (InterruptedException ignored) {}
+            videoCapturer.dispose();
+            videoCapturer = null;
+        }
+        if (localVideoTrack != null) {
+            localVideoTrack.dispose();
+            localVideoTrack = null;
+        }
+        if (videoSource != null) {
+            videoSource.dispose();
+            videoSource = null;
+        }
+        if (textureHelper != null) {
+            textureHelper.dispose();
+            textureHelper = null;
+        }
+    }
+
+    private void releaseAudioOnlyResources() {
+        if (localAudioTrack != null) {
+            localAudioTrack.dispose();
+            localAudioTrack = null;
+        }
+        if (audioSource != null) {
+            audioSource.dispose();
+            audioSource = null;
+        }
+    }
+
+    private void releaseLocalTracksAndSources() {
+        releaseVideoOnlyResources();
+        releaseAudioOnlyResources();
     }
 
     private static class SimpleSdpObserver implements SdpObserver {

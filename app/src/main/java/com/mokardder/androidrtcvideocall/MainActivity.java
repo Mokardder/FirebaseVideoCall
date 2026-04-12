@@ -1,8 +1,11 @@
 package com.mokardder.androidrtcvideocall;
 
 import android.Manifest;
+import android.app.Activity;
 import android.content.pm.PackageManager;
 import android.content.Intent;
+import android.media.projection.MediaProjection;
+import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -13,6 +16,8 @@ import android.util.Log;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -38,6 +43,8 @@ import org.webrtc.IceCandidate;
 import org.webrtc.MediaConstraints;
 import org.webrtc.PeerConnection;
 import org.webrtc.PeerConnectionFactory;
+import org.webrtc.RtpSender;
+import org.webrtc.ScreenCapturerAndroid;
 import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
 import org.webrtc.SurfaceTextureHelper;
@@ -57,6 +64,8 @@ public class MainActivity extends AppCompatActivity {
     private static final int CAPTURE_WIDTH = 1280;
     private static final int CAPTURE_HEIGHT = 720;
     private static final int CAPTURE_FPS = 30;
+    private static final String VIDEO_SOURCE_CAMERA = "camera";
+    private static final String VIDEO_SOURCE_SCREEN = "screen";
 
     private TextView statusText;
     private PeerConnectionFactory factory;
@@ -71,6 +80,8 @@ public class MainActivity extends AppCompatActivity {
     private VideoTrack localVideoTrack;
     private AudioSource audioSource;
     private AudioTrack localAudioTrack;
+    private RtpSender localVideoSender;
+    private RtpSender localAudioSender;
 
     private final List<IceCandidate> pendingRemoteCandidates = new ArrayList<>();
     private boolean preferFrontCamera = true;
@@ -83,6 +94,24 @@ public class MainActivity extends AppCompatActivity {
     private ValueEventListener controlsListener;
     private boolean isReconnecting = false;
     private String lastHandledOfferSdp;
+    private boolean useScreenShare = false;
+    private MediaProjectionManager mediaProjectionManager;
+    private Intent screenCapturePermissionData;
+    private int screenCapturePermissionCode = Activity.RESULT_CANCELED;
+    private final ActivityResultLauncher<Intent> screenCapturePermissionLauncher =
+            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+                if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) {
+                    screenCapturePermissionCode = result.getResultCode();
+                    screenCapturePermissionData = result.getData();
+                    useScreenShare = true;
+                    setStatus("Screen capture permission granted.");
+                    restartVideoTrackForCurrentSource();
+                } else {
+                    useScreenShare = false;
+                    updateWebStreamState();
+                    setStatus("Screen capture permission denied. Using camera.");
+                }
+            });
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -130,6 +159,7 @@ public class MainActivity extends AppCompatActivity {
     private void init() {
         startCallService();
         acquireWakeLock();
+        mediaProjectionManager = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
         setStatus("Initializing WebRTC...");
         PeerConnectionFactory.initialize(
                 PeerConnectionFactory.InitializationOptions.builder(this)
@@ -262,25 +292,16 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void createAndAddLocalTracks() {
-        videoCapturer = createCameraCapturer();
-        textureHelper = SurfaceTextureHelper.create("captureThread", eglBase.getEglBaseContext());
-
-        videoSource = factory.createVideoSource(false);
-        videoCapturer.initialize(textureHelper, getApplicationContext(), videoSource.getCapturerObserver());
-        videoCapturer.startCapture(CAPTURE_WIDTH, CAPTURE_HEIGHT, CAPTURE_FPS);
-        setTorchEnabled(isTorchEnabled);
-
-        localVideoTrack = factory.createVideoTrack("video0", videoSource);
-        localVideoTrack.setEnabled(true);
-
+        setupVideoCaptureTrack();
         audioSource = factory.createAudioSource(new MediaConstraints());
         localAudioTrack = factory.createAudioTrack("audio0", audioSource);
         localAudioTrack.setEnabled(true);
 
         List<String> streamIds = new ArrayList<>();
         streamIds.add("stream0");
-        peerConnection.addTrack(localVideoTrack, streamIds);
-        peerConnection.addTrack(localAudioTrack, streamIds);
+        localVideoSender = peerConnection.addTrack(localVideoTrack, streamIds);
+        localAudioSender = peerConnection.addTrack(localAudioTrack, streamIds);
+        updateWebStreamState();
     }
 
     private CameraEnumerator getCameraEnumerator() {
@@ -313,6 +334,86 @@ public class MainActivity extends AppCompatActivity {
         throw new IllegalStateException("No camera found");
     }
 
+    private VideoCapturer createScreenCapturer() {
+        if (screenCapturePermissionData == null || mediaProjectionManager == null) return null;
+        return new ScreenCapturerAndroid(
+                screenCapturePermissionData,
+                new MediaProjection.Callback() {
+                    @Override
+                    public void onStop() {
+                        runOnUiThread(() -> {
+                            if (useScreenShare) {
+                                useScreenShare = false;
+                                setStatus("Screen sharing stopped by system. Switching to camera.");
+                                restartVideoTrackForCurrentSource();
+                            }
+                        });
+                    }
+                }
+        );
+    }
+
+    private void setupVideoCaptureTrack() {
+        VideoCapturer nextCapturer = null;
+        boolean wantsScreen = useScreenShare;
+        if (wantsScreen) {
+            nextCapturer = createScreenCapturer();
+        }
+        if (nextCapturer == null) {
+            useScreenShare = false;
+            nextCapturer = createCameraCapturer();
+        }
+
+        videoCapturer = nextCapturer;
+        textureHelper = SurfaceTextureHelper.create("captureThread", eglBase.getEglBaseContext());
+        videoSource = factory.createVideoSource(false);
+        videoCapturer.initialize(textureHelper, getApplicationContext(), videoSource.getCapturerObserver());
+        videoCapturer.startCapture(CAPTURE_WIDTH, CAPTURE_HEIGHT, CAPTURE_FPS);
+
+        localVideoTrack = factory.createVideoTrack("video0", videoSource);
+        localVideoTrack.setEnabled(true);
+        setTorchEnabled(isTorchEnabled);
+    }
+
+    private void restartVideoTrackForCurrentSource() {
+        if (factory == null || peerConnection == null || eglBase == null) return;
+        disposeVideoCaptureOnly();
+        setupVideoCaptureTrack();
+
+        if (localVideoSender != null) {
+            localVideoSender.setTrack(localVideoTrack, true);
+        } else {
+            List<String> streamIds = new ArrayList<>();
+            streamIds.add("stream0");
+            localVideoSender = peerConnection.addTrack(localVideoTrack, streamIds);
+        }
+        updateWebStreamState();
+    }
+
+    private void disposeVideoCaptureOnly() {
+        setTorchEnabled(false);
+        if (videoCapturer != null) {
+            try {
+                videoCapturer.stopCapture();
+            } catch (InterruptedException ignored) {}
+            videoCapturer.dispose();
+            videoCapturer = null;
+            flashlightCapturer = null;
+        }
+        if (localVideoTrack != null) {
+            localVideoTrack.dispose();
+            localVideoTrack = null;
+        }
+        if (videoSource != null) {
+            videoSource.dispose();
+            videoSource = null;
+        }
+        if (textureHelper != null) {
+            textureHelper.dispose();
+            textureHelper = null;
+        }
+    }
+
     private void listenForControls() {
         if (controlsListener != null) {
             callRef.child("controls").removeEventListener(controlsListener);
@@ -326,6 +427,7 @@ public class MainActivity extends AppCompatActivity {
                 String camera = snapshot.child("camera").getValue(String.class);
                 Boolean micMuted = snapshot.child("micMuted").getValue(Boolean.class);
                 Boolean torchOn = snapshot.child("torchOn").getValue(Boolean.class);
+                Boolean screenShare = snapshot.child("screenShare").getValue(Boolean.class);
 
                 if (camera != null) {
                     boolean nextFront = !"back".equalsIgnoreCase(camera);
@@ -342,6 +444,10 @@ public class MainActivity extends AppCompatActivity {
                 if (torchOn != null) {
                     setTorchEnabled(torchOn);
                 }
+
+                if (screenShare != null && screenShare != useScreenShare) {
+                    toggleScreenShare(screenShare);
+                }
             }
 
             @Override
@@ -353,6 +459,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void switchCamera() {
+        if (useScreenShare) return;
         if (!(videoCapturer instanceof CameraVideoCapturer)) return;
         ((CameraVideoCapturer) videoCapturer).switchCamera(new CameraVideoCapturer.CameraSwitchHandler() {
             @Override
@@ -391,6 +498,9 @@ public class MainActivity extends AppCompatActivity {
 
     private void setTorchEnabled(boolean enabled) {
         isTorchEnabled = enabled;
+        if (useScreenShare && enabled) {
+            return;
+        }
         if (flashlightCapturer == null) {
             if (enabled) setStatus("Torch capturer is not ready yet.");
             return;
@@ -402,43 +512,53 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void toggleScreenShare(boolean enable) {
+        if (enable) {
+            if (screenCapturePermissionData != null) {
+                useScreenShare = true;
+                restartVideoTrackForCurrentSource();
+                return;
+            }
+            if (mediaProjectionManager == null) {
+                setStatus("Screen sharing is unavailable on this device.");
+                return;
+            }
+            setStatus("Requesting screen capture permission...");
+            screenCapturePermissionLauncher.launch(mediaProjectionManager.createScreenCaptureIntent());
+            return;
+        }
+
+        if (useScreenShare) {
+            useScreenShare = false;
+            restartVideoTrackForCurrentSource();
+        }
+    }
+
+    private void updateWebStreamState() {
+        if (callRef == null) return;
+        callRef.child("state").child("videoSource").setValue(useScreenShare ? VIDEO_SOURCE_SCREEN : VIDEO_SOURCE_CAMERA);
+        callRef.child("state").child("screenShareActive").setValue(useScreenShare);
+    }
+
     private void resetPeerConnectionForNextCall() {
-
-
-
         setTorchEnabled(false);
         pendingRemoteCandidates.clear();
+        localVideoSender = null;
+        localAudioSender = null;
 
         if (peerConnection != null) {
             peerConnection.close();
             peerConnection = null;
         }
 
-        if (videoCapturer != null) {
-            try { videoCapturer.stopCapture(); } catch (InterruptedException ignored) {}
-            videoCapturer.dispose();
-            videoCapturer = null;
-            flashlightCapturer = null;
-        }
-        if (localVideoTrack != null) {
-            localVideoTrack.dispose();
-            localVideoTrack = null;
-        }
+        disposeVideoCaptureOnly();
         if (localAudioTrack != null) {
             localAudioTrack.dispose();
             localAudioTrack = null;
         }
-        if (videoSource != null) {
-            videoSource.dispose();
-            videoSource = null;
-        }
         if (audioSource != null) {
             audioSource.dispose();
             audioSource = null;
-        }
-        if (textureHelper != null) {
-            textureHelper.dispose();
-            textureHelper = null;
         }
 
         createPeerConnection();
@@ -541,7 +661,7 @@ public class MainActivity extends AppCompatActivity {
                 answer.put("type", sessionDescription.type.canonicalForm());
                 answer.put("sdp", sessionDescription.description);
                 callRef.child("answer").setValue(answer);
-                setStatus("Auto-answered. Sending camera+audio.");
+                setStatus("Auto-answered. Sending " + (useScreenShare ? "screen" : "camera") + "+audio.");
             }
 
             @Override public void onSetSuccess() {}
@@ -605,16 +725,9 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         setTorchEnabled(false);
-        if (videoCapturer != null) {
-            try { videoCapturer.stopCapture(); } catch (InterruptedException ignored) {}
-            videoCapturer.dispose();
-            flashlightCapturer = null;
-        }
-        if (localVideoTrack != null) localVideoTrack.dispose();
+        disposeVideoCaptureOnly();
         if (localAudioTrack != null) localAudioTrack.dispose();
-        if (videoSource != null) videoSource.dispose();
         if (audioSource != null) audioSource.dispose();
-        if (textureHelper != null) textureHelper.dispose();
         if (peerConnection != null) peerConnection.close();
         if (factory != null) factory.dispose();
         if (eglBase != null) eglBase.release();

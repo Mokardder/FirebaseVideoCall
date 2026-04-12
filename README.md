@@ -3,7 +3,7 @@
 This starter project gives you a **Firebase Realtime Database signaling flow** for:
 
 - **Web browser**: starts the call, sends no local camera video (`recvonly`), and receives Android media.
-- **Android (Java)**: auto-accepts incoming offer, sends camera + mic, does not render remote video.
+- **Android (Java)**: auto-accepts incoming offer, sends camera + mic, does not render remote video, and applies caller controls for camera/mic/torch.
 - **TURN relay**: included in ICE server list (replace placeholders with your own TURN credentials).
 
 > This is a pragmatic starter. You still need to plug in your Firebase config, TURN credentials, and Android WebRTC dependency versions that match your environment.
@@ -11,9 +11,10 @@ This starter project gives you a **Firebase Realtime Database signaling flow** f
 ## 1) Call flow
 
 1. Browser creates offer and writes it to `calls/{callId}/offer`.
-2. Android listens to that call path and auto-answers when an offer appears.
-3. Android writes answer to `calls/{callId}/answer`.
-4. Both sides exchange candidates under:
+2. Browser writes control state under `calls/{callId}/controls` (camera, micMuted, torchOn).
+3. Android listens to the call path, applies controls, and auto-answers when an offer appears.
+4. Android writes answer to `calls/{callId}/answer`.
+5. Both sides exchange candidates under:
    - Browser candidates: `calls/{callId}/candidates/browser/{candidateId}`
    - Android candidates: `calls/{callId}/candidates/android/{candidateId}`
 
@@ -25,6 +26,7 @@ This starter project gives you a **Firebase Realtime Database signaling flow** f
     "demo-call-001": {
       "offer": { "type": "offer", "sdp": "..." },
       "answer": { "type": "answer", "sdp": "..." },
+      "controls": { "camera": "front", "micMuted": false, "torchOn": false },
       "candidates": {
         "browser": {
           "-Nx1": { "candidate": "...", "sdpMid": "0", "sdpMLineIndex": 0 }
@@ -46,29 +48,30 @@ For testing only (tighten before production):
 {
   "rules": {
     "calls": {
-      ".read": "auth != null",
-      ".write": "auth != null"
+      ".read": true,
+      ".write": true
     }
   }
 }
 ```
 
-The web client signs in with **Anonymous Auth** before writing signaling data. If you keep `auth != null` rules, enable Anonymous provider in Firebase Console (Authentication -> Sign-in method).
+This sample no longer uses Firebase Authentication. Use explicit path validation and rate limiting before production.
 
 ## 4) Web app
 
 - Open `web/index.html` through a local static server.
 - This web client is **vanilla JavaScript only**, and uses Firebase **CDN scripts** (no npm).
 - Set your Firebase web config directly inside `web/app.js`.
-- Click **Start Call**.
+- Choose camera (front/back) and click **Start Call**.
+- While in call, use **Mute Mic** and **Torch On/Off** (these control Android sender state).
 
 ## 5) Android app
 
-- Add your `google-services.json` and Firebase dependencies (`database` + `auth`).
+- Add your `google-services.json` and Firebase dependencies (`database`).
 - Add camera/microphone permissions.
 - Install app and grant permissions once.
 - App listens to the same `callId` and auto-answers.
-- Enable Anonymous auth provider in Firebase Console (web + Android sample both use it).
+- Android has no local call controls; it follows control commands from the browser caller.
 
 ## 6) TURN relay
 
@@ -87,3 +90,16 @@ Use your coturn or managed TURN provider credentials.
 - If ICE fails on mobile networks, verify TURN UDP/TCP/TLS reachability.
 - Android now includes TURN UDP + TCP + TLS entries and will call `restartIce()` when ICE reaches FAILED.
 - If Android crashes with `Default FirebaseApp is not initialized`, verify `google-services.json`, apply `com.google.gms.google-services`, and initialize Firebase before `FirebaseDatabase.getInstance(...)`.
+
+
+## 8) Background behavior (Android)
+
+- App starts a foreground service (`CallForegroundService`) to keep signaling/call alive when app is backgrounded or screen is locked.
+- Activity requests show/turn-screen-on flags and acquires a partial wakelock for call reliability.
+- Android still requires user-granted camera/mic permissions once; after that, app can auto-answer offers while running.
+
+## 9) Integration tips (smaller app size)
+
+- In your host app, include only required Firebase modules (`firebase-database`) and WebRTC dependency.
+- Enable minify/shrinker in release builds and remove unused ABIs/resources in your main project Gradle config.
+- Keep TURN credentials outside source code (remote config / secure backend).

@@ -1,8 +1,13 @@
-package com.example.firebasevideocall;
+package com.mokardder.androidrtcvideocall;
 
 import android.Manifest;
 import android.content.pm.PackageManager;
+import android.content.Intent;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
+import android.view.WindowManager;
+import android.util.Log;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -11,7 +16,7 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.google.firebase.FirebaseApp;
-import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.database.ChildEventListener;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
@@ -20,17 +25,17 @@ import com.google.firebase.database.ValueEventListener;
 
 import org.webrtc.AudioSource;
 import org.webrtc.AudioTrack;
-import org.webrtc.Camera2Enumerator;
+import org.webrtc.FlashlightCameraCapturer;
+import org.webrtc.FlashlightCameraEnumerator;
+import org.webrtc.CameraEnumerator;
 import org.webrtc.CameraVideoCapturer;
 import org.webrtc.DefaultVideoDecoderFactory;
 import org.webrtc.DefaultVideoEncoderFactory;
 import org.webrtc.EglBase;
 import org.webrtc.IceCandidate;
 import org.webrtc.MediaConstraints;
-import org.webrtc.MediaStreamTrack;
 import org.webrtc.PeerConnection;
 import org.webrtc.PeerConnectionFactory;
-import org.webrtc.RtpReceiver;
 import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
 import org.webrtc.SurfaceTextureHelper;
@@ -45,7 +50,11 @@ import java.util.Map;
 
 public class MainActivity extends AppCompatActivity {
     private static final int REQ_PERMS = 1101;
+    private static final String TAG = "AndroidRtcVideoCall";
     private static final String CALL_ID = "demo-call-001";
+    private static final int CAPTURE_WIDTH = 1280;
+    private static final int CAPTURE_HEIGHT = 720;
+    private static final int CAPTURE_FPS = 30;
 
     private TextView statusText;
     private PeerConnectionFactory factory;
@@ -54,6 +63,7 @@ public class MainActivity extends AppCompatActivity {
     private DatabaseReference callRef;
 
     private VideoCapturer videoCapturer;
+    private FlashlightCameraCapturer flashlightCapturer;
     private SurfaceTextureHelper textureHelper;
     private VideoSource videoSource;
     private VideoTrack localVideoTrack;
@@ -61,12 +71,21 @@ public class MainActivity extends AppCompatActivity {
     private AudioTrack localAudioTrack;
 
     private final List<IceCandidate> pendingRemoteCandidates = new ArrayList<>();
+    private boolean preferFrontCamera = true;
+    private boolean isMicMuted = false;
+    private boolean isTorchEnabled = false;
+    private String activeCameraName;
+    private PowerManager.WakeLock wakeLock;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         statusText = findViewById(R.id.statusText);
+
+        setShowWhenLocked(true);
+        setTurnScreenOn(true);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         if (!hasPerms()) {
             ActivityCompat.requestPermissions(this,
@@ -94,6 +113,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void init() {
+        startCallService();
+        acquireWakeLock();
         setStatus("Initializing WebRTC...");
         PeerConnectionFactory.initialize(
                 PeerConnectionFactory.InitializationOptions.builder(this)
@@ -111,20 +132,14 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        FirebaseAuth.getInstance(firebaseApp).signInAnonymously().addOnCompleteListener(task -> {
-            if (!task.isSuccessful()) {
-                setStatus("Firebase auth failed. Enable Anonymous auth in Firebase Console.");
-                return;
-            }
+        callRef = FirebaseDatabase.getInstance(firebaseApp).getReference("calls").child(CALL_ID);
 
-            callRef = FirebaseDatabase.getInstance(firebaseApp).getReference("calls").child(CALL_ID);
+        createPeerConnection();
+        createAndAddLocalTracks();
+        listenForOfferAndCandidates();
+        listenForControls();
 
-            createPeerConnection();
-            createAndAddLocalTracks();
-            listenForOfferAndCandidates();
-
-            setStatus("Waiting for offer on calls/" + CALL_ID + "/offer");
-        });
+        setStatus("Waiting for offer on calls/" + CALL_ID + "/offer");
     }
 
     private void createPeerConnection() {
@@ -157,7 +172,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onIceConnectionChange(PeerConnection.IceConnectionState iceConnectionState) {
                 setStatus("ICE: " + iceConnectionState.name());
-                if (iceConnectionState == PeerConnection.IceConnectionState.FAILED) {
+                if (iceConnectionState == PeerConnection.IceConnectionState.FAILED && peerConnection != null) {
                     peerConnection.restartIce();
                 }
             }
@@ -193,10 +208,6 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onRenegotiationNeeded() {}
 
-            @Override
-            public void onAddTrack(RtpReceiver rtpReceiver, MediaStreamTrack[] mediaStreamTracks) {
-                // Intentionally ignore remote tracks: Android should not display remote video.
-            }
         });
     }
 
@@ -206,7 +217,8 @@ public class MainActivity extends AppCompatActivity {
 
         videoSource = factory.createVideoSource(false);
         videoCapturer.initialize(textureHelper, getApplicationContext(), videoSource.getCapturerObserver());
-        videoCapturer.startCapture(1280, 720, 30);
+        videoCapturer.startCapture(CAPTURE_WIDTH, CAPTURE_HEIGHT, CAPTURE_FPS);
+        setTorchEnabled(isTorchEnabled);
 
         localVideoTrack = factory.createVideoTrack("video0", videoSource);
         localVideoTrack.setEnabled(true);
@@ -221,23 +233,163 @@ public class MainActivity extends AppCompatActivity {
         peerConnection.addTrack(localAudioTrack, streamIds);
     }
 
+    private CameraEnumerator getCameraEnumerator() {
+        return new FlashlightCameraEnumerator(true);
+    }
+
     private VideoCapturer createCameraCapturer() {
-        Camera2Enumerator enumerator = new Camera2Enumerator(this);
+        CameraEnumerator enumerator = getCameraEnumerator();
         String[] names = enumerator.getDeviceNames();
 
         for (String n : names) {
-            if (enumerator.isFrontFacing(n)) {
+            if ((preferFrontCamera && enumerator.isFrontFacing(n)) || (!preferFrontCamera && !enumerator.isFrontFacing(n))) {
                 CameraVideoCapturer c = enumerator.createCapturer(n, null);
-                if (c != null) return c;
+                if (c != null) {
+                    activeCameraName = n;
+                    if (c instanceof FlashlightCameraCapturer) flashlightCapturer = (FlashlightCameraCapturer) c;
+                    return c;
+                }
             }
         }
+
         for (String n : names) {
-            if (!enumerator.isFrontFacing(n)) {
-                CameraVideoCapturer c = enumerator.createCapturer(n, null);
-                if (c != null) return c;
+            CameraVideoCapturer c = enumerator.createCapturer(n, null);
+            if (c != null) {
+                activeCameraName = n;
+                if (c instanceof FlashlightCameraCapturer) flashlightCapturer = (FlashlightCameraCapturer) c;
+                return c;
             }
         }
         throw new IllegalStateException("No camera found");
+    }
+
+    private void listenForControls() {
+        callRef.child("controls").addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                if (!snapshot.exists()) return;
+
+                String camera = snapshot.child("camera").getValue(String.class);
+                Boolean micMuted = snapshot.child("micMuted").getValue(Boolean.class);
+                Boolean torchOn = snapshot.child("torchOn").getValue(Boolean.class);
+
+                if (camera != null) {
+                    boolean nextFront = !"back".equalsIgnoreCase(camera);
+                    if (nextFront != preferFrontCamera) {
+                        preferFrontCamera = nextFront;
+                        switchCamera();
+                    }
+                }
+
+                if (micMuted != null) {
+                    setMicMuted(micMuted);
+                }
+
+                if (torchOn != null) {
+                    setTorchEnabled(torchOn);
+                }
+            }
+
+            @Override
+            public void onCancelled(@NonNull DatabaseError error) {
+                setStatus("Controls listener error: " + error.getMessage());
+            }
+        });
+    }
+
+    private void switchCamera() {
+        if (!(videoCapturer instanceof CameraVideoCapturer)) return;
+        ((CameraVideoCapturer) videoCapturer).switchCamera(new CameraVideoCapturer.CameraSwitchHandler() {
+            @Override
+            public void onCameraSwitchDone(boolean isFrontCamera) {
+                preferFrontCamera = isFrontCamera;
+                findActiveCameraName(isFrontCamera);
+                setStatus("Camera switched to " + (isFrontCamera ? "front" : "back"));
+                if (!isFrontCamera && isTorchEnabled) {
+                    setTorchEnabled(true);
+                }
+            }
+
+            @Override
+            public void onCameraSwitchError(String errorDescription) {
+                setStatus("Camera switch failed: " + errorDescription);
+            }
+        });
+    }
+
+    private void findActiveCameraName(boolean isFront) {
+        CameraEnumerator enumerator = getCameraEnumerator();
+        for (String n : enumerator.getDeviceNames()) {
+            if ((isFront && enumerator.isFrontFacing(n)) || (!isFront && !enumerator.isFrontFacing(n))) {
+                activeCameraName = n;
+                return;
+            }
+        }
+    }
+
+    private void setMicMuted(boolean muted) {
+        isMicMuted = muted;
+        if (localAudioTrack != null) {
+            localAudioTrack.setEnabled(!isMicMuted);
+        }
+    }
+
+    private void setTorchEnabled(boolean enabled) {
+        isTorchEnabled = enabled;
+        if (flashlightCapturer == null) {
+            if (enabled) setStatus("Torch capturer is not ready yet.");
+            return;
+        }
+
+        boolean applied = flashlightCapturer.setFlashlightActive(enabled);
+        if (!applied && enabled) {
+            setStatus("Torch is not supported by current camera/capturer.");
+        }
+    }
+
+    private void resetPeerConnectionForNextCall() {
+
+
+
+        setTorchEnabled(false);
+        pendingRemoteCandidates.clear();
+
+        if (peerConnection != null) {
+            peerConnection.close();
+            peerConnection = null;
+        }
+
+        if (videoCapturer != null) {
+            try { videoCapturer.stopCapture(); } catch (InterruptedException ignored) {}
+            videoCapturer.dispose();
+            videoCapturer = null;
+            flashlightCapturer = null;
+        }
+        if (localVideoTrack != null) {
+            localVideoTrack.dispose();
+            localVideoTrack = null;
+        }
+        if (localAudioTrack != null) {
+            localAudioTrack.dispose();
+            localAudioTrack = null;
+        }
+        if (videoSource != null) {
+            videoSource.dispose();
+            videoSource = null;
+        }
+        if (audioSource != null) {
+            audioSource.dispose();
+            audioSource = null;
+        }
+        if (textureHelper != null) {
+            textureHelper.dispose();
+            textureHelper = null;
+        }
+
+        createPeerConnection();
+        createAndAddLocalTracks();
+        setMicMuted(isMicMuted);
+        setTorchEnabled(isTorchEnabled);
     }
 
     private void listenForOfferAndCandidates() {
@@ -245,7 +397,11 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 if (!snapshot.exists()) return;
-                if (peerConnection.getRemoteDescription() != null) return;
+                if (peerConnection == null) return;
+
+                if (peerConnection.getRemoteDescription() != null) {
+                    resetPeerConnectionForNextCall();
+                }
 
                 String type = snapshot.child("type").getValue(String.class);
                 String sdp = snapshot.child("sdp").getValue(String.class);
@@ -278,7 +434,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        callRef.child("candidates").child("browser").addChildEventListener(new com.google.firebase.database.ChildEventListener() {
+        callRef.child("candidates").child("browser").addChildEventListener(new ChildEventListener() {
             @Override
             public void onChildAdded(@NonNull DataSnapshot snapshot, String previousChildName) {
                 String candidate = snapshot.child("candidate").getValue(String.class);
@@ -286,6 +442,7 @@ public class MainActivity extends AppCompatActivity {
                 Integer sdpMLineIndex = snapshot.child("sdpMLineIndex").getValue(Integer.class);
                 if (candidate == null || sdpMid == null || sdpMLineIndex == null) return;
                 IceCandidate remote = new IceCandidate(sdpMid, sdpMLineIndex, candidate);
+                if (peerConnection == null) return;
                 if (peerConnection.getRemoteDescription() == null) {
                     pendingRemoteCandidates.add(remote);
                     return;
@@ -326,16 +483,51 @@ public class MainActivity extends AppCompatActivity {
         }, new MediaConstraints());
     }
 
+
+    private void startCallService() {
+        Intent intent = new Intent(this, CallForegroundService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent);
+        } else {
+            startService(intent);
+        }
+    }
+
+    private void stopCallService() {
+        stopService(new Intent(this, CallForegroundService.class));
+    }
+
+    private void acquireWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) return;
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        if (pm == null) return;
+        wakeLock = pm.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "AndroidRtcVideoCall:CallWakeLock"
+        );
+        wakeLock.setReferenceCounted(false);
+        wakeLock.acquire(10 * 60 * 60 * 1000L);
+    }
+
+    private void releaseWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release();
+        }
+    }
+
     private void setStatus(String msg) {
+        Log.d(TAG, msg);
         runOnUiThread(() -> statusText.setText(msg));
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        setTorchEnabled(false);
         if (videoCapturer != null) {
             try { videoCapturer.stopCapture(); } catch (InterruptedException ignored) {}
             videoCapturer.dispose();
+            flashlightCapturer = null;
         }
         if (localVideoTrack != null) localVideoTrack.dispose();
         if (localAudioTrack != null) localAudioTrack.dispose();
@@ -345,6 +537,8 @@ public class MainActivity extends AppCompatActivity {
         if (peerConnection != null) peerConnection.close();
         if (factory != null) factory.dispose();
         if (eglBase != null) eglBase.release();
+        releaseWakeLock();
+        stopCallService();
     }
 
     private static class SimpleSdpObserver implements SdpObserver {

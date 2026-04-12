@@ -6,7 +6,6 @@
 dependencies {
     implementation platform('com.google.firebase:firebase-bom:34.0.0')
     implementation 'com.google.firebase:firebase-database'
-    implementation 'com.google.firebase:firebase-auth'
 
     // WebRTC (example from maven central mirror builds)
     implementation 'io.github.webrtc-sdk:android:125.6422.02'
@@ -32,6 +31,7 @@ plugins {
 - App waits for `calls/demo-call-001/offer`.
 - It auto-creates answer.
 - It sends local camera + mic.
+- It applies browser-provided controls from `calls/{callId}/controls` (camera/mic/torch).
 - It ignores remote video rendering by design.
 
 ## Firebase initialization crash fix
@@ -43,11 +43,10 @@ If you see `Default FirebaseApp is not initialized`, ensure all 3 are in place:
 3. `FirebaseApp.initializeApp(context)` is called before `FirebaseDatabase.getInstance(...)` if auto-init is not happening in your build variant.
 
 
-## Auth requirement
+## Camera and in-call controls
 
-- Enable Anonymous auth provider in Firebase Console (Authentication -> Sign-in method).
-- This sample signs in anonymously before reading/writing RTDB signaling paths.
-
+- Controls live in the browser caller UI.
+- Android listens to RTDB `controls` and applies camera switch, mic mute, and torch state updates.
 
 ## ICE failed troubleshooting
 
@@ -63,3 +62,10 @@ If you see `Default FirebaseApp is not initialized`, ensure all 3 are in place:
 - Username: `83eebabf8b4cce9d5dbcb649`
 - Password: `2D7JvfkOQtBdYW3R`
 - Includes `3478/udp`, `3478/tcp`, `443/tcp`, and `5349/tls` entries in code.
+
+
+## Foreground service + lock screen
+
+- `CallForegroundService` keeps call/signaling alive while app is in background or screen is locked.
+- Manifest now includes `FOREGROUND_SERVICE` and `WAKE_LOCK` permissions and service declaration with `foregroundServiceType="camera|microphone"`.
+- `MainActivity` acquires/releases a partial wakelock and starts/stops the service in lifecycle.

@@ -78,6 +78,11 @@ public class MainActivity extends AppCompatActivity {
     private boolean isTorchEnabled = false;
     private String activeCameraName;
     private PowerManager.WakeLock wakeLock;
+    private ValueEventListener offerListener;
+    private ChildEventListener browserCandidatesListener;
+    private ValueEventListener controlsListener;
+    private boolean isReconnecting = false;
+    private String lastHandledOfferSdp;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -232,6 +237,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void reconnectCall() {
+        if (isReconnecting) return;
+        isReconnecting = true;
         runOnUiThread(() -> {
             try {
                 resetPeerConnectionForNextCall();
@@ -240,6 +247,7 @@ public class MainActivity extends AppCompatActivity {
                 callRef.child("offer").removeValue();
                 callRef.child("answer").removeValue();
                 callRef.child("candidates").removeValue();
+                lastHandledOfferSdp = null;
 
                 // Re-listen for new offer
                 listenForOfferAndCandidates();
@@ -247,6 +255,8 @@ public class MainActivity extends AppCompatActivity {
                 setStatus("Waiting for reconnection offer...");
             } catch (Exception e) {
                 setStatus("Reconnect failed: " + e.getMessage());
+            } finally {
+                isReconnecting = false;
             }
         });
     }
@@ -304,7 +314,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void listenForControls() {
-        callRef.child("controls").addValueEventListener(new ValueEventListener() {
+        if (controlsListener != null) {
+            callRef.child("controls").removeEventListener(controlsListener);
+        }
+
+        controlsListener = new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 if (!snapshot.exists()) return;
@@ -334,7 +348,8 @@ public class MainActivity extends AppCompatActivity {
             public void onCancelled(@NonNull DatabaseError error) {
                 setStatus("Controls listener error: " + error.getMessage());
             }
-        });
+        };
+        callRef.child("controls").addValueEventListener(controlsListener);
     }
 
     private void switchCamera() {
@@ -433,19 +448,28 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void listenForOfferAndCandidates() {
-        callRef.child("offer").addValueEventListener(new ValueEventListener() {
+        if (offerListener != null) {
+            callRef.child("offer").removeEventListener(offerListener);
+        }
+        if (browserCandidatesListener != null) {
+            callRef.child("candidates").child("browser").removeEventListener(browserCandidatesListener);
+        }
+
+        offerListener = new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 if (!snapshot.exists()) return;
                 if (peerConnection == null) return;
 
-                if (peerConnection.getRemoteDescription() != null) {
-                    resetPeerConnectionForNextCall();
-                }
-
                 String type = snapshot.child("type").getValue(String.class);
                 String sdp = snapshot.child("sdp").getValue(String.class);
                 if (type == null || sdp == null) return;
+                if (!"offer".equalsIgnoreCase(type)) return;
+                if (sdp.equals(lastHandledOfferSdp)) return;
+
+                if (peerConnection.getRemoteDescription() != null) {
+                    resetPeerConnectionForNextCall();
+                }
 
                 SessionDescription offer = new SessionDescription(SessionDescription.Type.fromCanonicalForm(type), sdp);
                 peerConnection.setRemoteDescription(new SdpObserver() {
@@ -454,6 +478,7 @@ public class MainActivity extends AppCompatActivity {
 
                     @Override
                     public void onSetSuccess() {
+                        lastHandledOfferSdp = sdp;
                         drainPendingRemoteCandidates();
                         createAndSendAnswer();
                     }
@@ -472,9 +497,10 @@ public class MainActivity extends AppCompatActivity {
             public void onCancelled(@NonNull DatabaseError error) {
                 setStatus("Offer listener error: " + error.getMessage());
             }
-        });
+        };
+        callRef.child("offer").addValueEventListener(offerListener);
 
-        callRef.child("candidates").child("browser").addChildEventListener(new ChildEventListener() {
+        browserCandidatesListener = new ChildEventListener() {
             @Override
             public void onChildAdded(@NonNull DataSnapshot snapshot, String previousChildName) {
                 String candidate = snapshot.child("candidate").getValue(String.class);
@@ -494,7 +520,8 @@ public class MainActivity extends AppCompatActivity {
             @Override public void onChildRemoved(@NonNull DataSnapshot snapshot) {}
             @Override public void onChildMoved(@NonNull DataSnapshot snapshot, String previousChildName) {}
             @Override public void onCancelled(@NonNull DatabaseError error) {}
-        });
+        };
+        callRef.child("candidates").child("browser").addChildEventListener(browserCandidatesListener);
     }
 
     private void drainPendingRemoteCandidates() {
@@ -566,6 +593,17 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        if (callRef != null) {
+            if (offerListener != null) {
+                callRef.child("offer").removeEventListener(offerListener);
+            }
+            if (browserCandidatesListener != null) {
+                callRef.child("candidates").child("browser").removeEventListener(browserCandidatesListener);
+            }
+            if (controlsListener != null) {
+                callRef.child("controls").removeEventListener(controlsListener);
+            }
+        }
         setTorchEnabled(false);
         if (videoCapturer != null) {
             try { videoCapturer.stopCapture(); } catch (InterruptedException ignored) {}

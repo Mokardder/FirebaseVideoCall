@@ -21,7 +21,7 @@
   const torchBtn = document.getElementById("torchBtn");
   const sendFcmBtn = document.getElementById("sendFcmBtn");
   const fcmEndpointInput = document.getElementById("fcmEndpoint");
-  const fcmTokenInput = document.getElementById("fcmToken");
+  const fcmTopicInput = document.getElementById("fcmTopic");
   const logView = document.getElementById("log");
 
   let pc = null;
@@ -67,15 +67,15 @@
 
   async function triggerAndroidByFcm() {
     const endpoint = fcmEndpointInput.value.trim();
-    const token = fcmTokenInput.value.trim();
+    const topic = fcmTopicInput.value.trim();
     const callId = callIdInput.value.trim();
 
     if (!endpoint) {
       throw new Error("FCM endpoint is required.");
     }
 
-    if (!token) {
-      throw new Error("Android FCM registration token is required.");
+    if (!topic) {
+      throw new Error("FCM topic is required.");
     }
 
     if (!callId) {
@@ -83,7 +83,7 @@
     }
 
     const payload = {
-      token,
+      topic,
       notification: {
         title: "Incoming WebRTC Call",
         body: `Join call: ${callId}`,

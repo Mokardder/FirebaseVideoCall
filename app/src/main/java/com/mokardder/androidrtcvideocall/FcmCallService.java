@@ -12,6 +12,7 @@ import androidx.core.app.NotificationManagerCompat;
 
 import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
+import com.google.firebase.messaging.FirebaseMessaging;
 
 public class FcmCallService extends FirebaseMessagingService {
     private static final String TAG = "FcmCallService";
@@ -23,6 +24,14 @@ public class FcmCallService extends FirebaseMessagingService {
     public void onNewToken(String token) {
         super.onNewToken(token);
         Log.d(TAG, "FCM token refreshed: " + token);
+        FirebaseMessaging.getInstance().subscribeToTopic(MainActivity.FCM_CALL_TOPIC)
+                .addOnCompleteListener(task -> {
+                    if (task.isSuccessful()) {
+                        Log.d(TAG, "Subscribed to topic on token refresh: " + MainActivity.FCM_CALL_TOPIC);
+                    } else {
+                        Log.w(TAG, "Topic subscribe failed on token refresh", task.getException());
+                    }
+                });
     }
 
     @Override

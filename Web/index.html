@@ -9,7 +9,7 @@
       video { width: 100%; max-width: 720px; background: #111; border-radius: 8px; }
       .row { display: flex; gap: .5rem; margin-bottom: 1rem; flex-wrap: wrap; align-items: center; }
       input, button, select { padding: .6rem; }
-      #fcmToken, #fcmEndpoint { width: min(100%, 720px); }
+      #fcmTopic, #fcmEndpoint { width: min(100%, 720px); }
       #log { white-space: pre-wrap; background: #f6f6f6; padding: .8rem; border-radius: 8px; min-height: 120px; }
       .note { font-size: .9rem; color: #444; margin: 0 0 1rem; }
     </style>
@@ -37,7 +37,7 @@
       <input id="fcmEndpoint" placeholder="https://YOUR_BACKEND/send-fcm" />
     </div>
     <div class="row">
-      <input id="fcmToken" placeholder="Android device FCM token" />
+      <input id="fcmTopic" value="video_call_android" placeholder="FCM topic (example: video_call_android)" />
       <button id="sendFcmBtn">Send FCM</button>
     </div>
 

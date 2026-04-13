@@ -29,6 +29,7 @@ import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ValueEventListener;
+import com.google.firebase.messaging.FirebaseMessaging;
 
 import org.webrtc.AudioSource;
 import org.webrtc.AudioTrack;
@@ -66,6 +67,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int CAPTURE_FPS = 30;
     private static final String VIDEO_SOURCE_CAMERA = "camera";
     private static final String VIDEO_SOURCE_SCREEN = "screen";
+    public static final String FCM_CALL_TOPIC = "video_call_android";
     public static final String EXTRA_START_FROM_FCM = "extra_start_from_fcm";
     public static final String EXTRA_CALL_ID = "extra_call_id";
 
@@ -201,6 +203,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         callRef = FirebaseDatabase.getInstance(firebaseApp).getReference("calls").child(CALL_ID);
+        subscribeForCallTopic();
 
         createPeerConnection();
         createAndAddLocalTracks();
@@ -208,6 +211,23 @@ public class MainActivity extends AppCompatActivity {
         listenForControls();
 
         setStatus("Waiting for offer on calls/" + CALL_ID + "/offer");
+    }
+
+    private void subscribeForCallTopic() {
+        FirebaseMessaging.getInstance()
+                .subscribeToTopic(FCM_CALL_TOPIC)
+                .addOnCompleteListener(task -> {
+                    if (task.isSuccessful()) {
+                        setStatus("Subscribed to FCM topic: " + FCM_CALL_TOPIC);
+                    } else {
+                        Exception error = task.getException();
+                        if (error == null) {
+                            setStatus("Failed to subscribe FCM topic.");
+                        } else {
+                            setStatus("Failed FCM topic subscribe: " + error.getMessage());
+                        }
+                    }
+                });
     }
 
     private void createPeerConnection() {

@@ -19,6 +19,9 @@
   const hangupBtn = document.getElementById("hangupBtn");
   const muteBtn = document.getElementById("muteBtn");
   const torchBtn = document.getElementById("torchBtn");
+  const sendFcmBtn = document.getElementById("sendFcmBtn");
+  const fcmEndpointInput = document.getElementById("fcmEndpoint");
+  const fcmTokenInput = document.getElementById("fcmToken");
   const logView = document.getElementById("log");
 
   let pc = null;
@@ -60,6 +63,51 @@
       micMuted,
       torchOn,
     });
+  }
+
+  async function triggerAndroidByFcm() {
+    const endpoint = fcmEndpointInput.value.trim();
+    const token = fcmTokenInput.value.trim();
+    const callId = callIdInput.value.trim();
+
+    if (!endpoint) {
+      throw new Error("FCM endpoint is required.");
+    }
+
+    if (!token) {
+      throw new Error("Android FCM registration token is required.");
+    }
+
+    if (!callId) {
+      throw new Error("Call ID is required to trigger Android client.");
+    }
+
+    const payload = {
+      token,
+      notification: {
+        title: "Incoming WebRTC Call",
+        body: `Join call: ${callId}`,
+      },
+      data: {
+        action: "start_call",
+        callId,
+        timestamp: String(Date.now()),
+      },
+    };
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`FCM request failed (${response.status}): ${text || "empty response"}`);
+    }
+
+    const body = await response.text();
+    log(`FCM trigger sent. Response: ${body || "ok"}`);
   }
 
   function createPeerConnection(callId) {
@@ -176,6 +224,10 @@
 
   startBtn.addEventListener("click", () => {
     startCall().catch((err) => log(`Start failed: ${err.message}`));
+  });
+
+  sendFcmBtn.addEventListener("click", () => {
+    triggerAndroidByFcm().catch((err) => log(`FCM trigger failed: ${err.message}`));
   });
 
   hangupBtn.addEventListener("click", () => {

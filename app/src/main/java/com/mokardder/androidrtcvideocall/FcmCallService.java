@@ -1,0 +1,95 @@
+package com.mokardder.androidrtcvideocall;
+
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.Intent;
+import android.os.Build;
+import android.util.Log;
+
+import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
+
+import com.google.firebase.messaging.FirebaseMessagingService;
+import com.google.firebase.messaging.RemoteMessage;
+
+public class FcmCallService extends FirebaseMessagingService {
+    private static final String TAG = "FcmCallService";
+    private static final String ACTION_START_CALL = "start_call";
+    private static final String CHANNEL_ID = "incoming_call";
+    private static final int NOTIFICATION_ID = 2002;
+
+    @Override
+    public void onNewToken(String token) {
+        super.onNewToken(token);
+        Log.d(TAG, "FCM token refreshed: " + token);
+    }
+
+    @Override
+    public void onMessageReceived(RemoteMessage remoteMessage) {
+        super.onMessageReceived(remoteMessage);
+
+        String action = remoteMessage.getData().get("action");
+        String callId = remoteMessage.getData().get("callId");
+
+        if (ACTION_START_CALL.equals(action)) {
+            launchAppForIncomingCall(callId);
+            showIncomingCallNotification(callId);
+            Log.d(TAG, "Incoming call push handled for callId=" + callId);
+        } else {
+            Log.d(TAG, "Received non-call FCM data message: " + remoteMessage.getData());
+        }
+    }
+
+    private void launchAppForIncomingCall(String callId) {
+        Intent launchIntent = new Intent(this, MainActivity.class);
+        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        launchIntent.putExtra(MainActivity.EXTRA_START_FROM_FCM, true);
+        launchIntent.putExtra(MainActivity.EXTRA_CALL_ID, callId);
+        startActivity(launchIntent);
+    }
+
+    private void showIncomingCallNotification(String callId) {
+        createChannelIfNeeded();
+
+        Intent contentIntent = new Intent(this, MainActivity.class);
+        contentIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        contentIntent.putExtra(MainActivity.EXTRA_START_FROM_FCM, true);
+        contentIntent.putExtra(MainActivity.EXTRA_CALL_ID, callId);
+
+        PendingIntent pendingIntent = PendingIntent.getActivity(
+                this,
+                0,
+                contentIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle("Incoming video call")
+                .setContentText(callId == null || callId.isEmpty() ? "Tap to open app" : "Call ID: " + callId)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent);
+
+        NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, builder.build());
+    }
+
+    private void createChannelIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return;
+        }
+
+        NotificationChannel channel = new NotificationChannel(
+                CHANNEL_ID,
+                "Incoming call",
+                NotificationManager.IMPORTANCE_HIGH
+        );
+        channel.setDescription("Notifies about incoming FCM-triggered calls");
+
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        if (manager != null) {
+            manager.createNotificationChannel(channel);
+        }
+    }
+}

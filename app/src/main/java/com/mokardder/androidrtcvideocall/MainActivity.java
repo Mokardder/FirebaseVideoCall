@@ -66,6 +66,8 @@ public class MainActivity extends AppCompatActivity {
     private static final int CAPTURE_FPS = 30;
     private static final String VIDEO_SOURCE_CAMERA = "camera";
     private static final String VIDEO_SOURCE_SCREEN = "screen";
+    public static final String EXTRA_START_FROM_FCM = "extra_start_from_fcm";
+    public static final String EXTRA_CALL_ID = "extra_call_id";
 
     private TextView statusText;
     private PeerConnectionFactory factory;
@@ -118,6 +120,7 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         statusText = findViewById(R.id.statusText);
+        handleLaunchIntent(getIntent());
 
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -139,6 +142,26 @@ public class MainActivity extends AppCompatActivity {
         }
 
         init();
+    }
+
+    private void handleLaunchIntent(Intent launchIntent) {
+        if (launchIntent == null) return;
+        boolean launchedFromFcm = launchIntent.getBooleanExtra(EXTRA_START_FROM_FCM, false);
+        if (!launchedFromFcm) return;
+
+        String incomingCallId = launchIntent.getStringExtra(EXTRA_CALL_ID);
+        if (incomingCallId == null || incomingCallId.isEmpty()) {
+            setStatus("App opened from FCM call request.");
+        } else {
+            setStatus("App opened from FCM for callId: " + incomingCallId);
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleLaunchIntent(intent);
     }
 
     private boolean hasPerms() {

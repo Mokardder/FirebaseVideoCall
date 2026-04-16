@@ -61,7 +61,7 @@ import java.util.Map;
 public class MainActivity extends AppCompatActivity {
     private static final int REQ_PERMS = 1101;
     private static final String TAG = "AndroidRtcVideoCall";
-    private static final String CALL_ID = "demo-call-001";
+    private static final String DEFAULT_CALL_ID = "demo-call-001";
     private static final int CAPTURE_WIDTH = 1280;
     private static final int CAPTURE_HEIGHT = 720;
     private static final int CAPTURE_FPS = 30;
@@ -76,6 +76,7 @@ public class MainActivity extends AppCompatActivity {
     private PeerConnection peerConnection;
     private EglBase eglBase;
     private DatabaseReference callRef;
+    private String currentCallId = DEFAULT_CALL_ID;
 
     private VideoCapturer videoCapturer;
     private FlashlightCameraCapturer flashlightCapturer;
@@ -149,9 +150,18 @@ public class MainActivity extends AppCompatActivity {
     private void handleLaunchIntent(Intent launchIntent) {
         if (launchIntent == null) return;
         boolean launchedFromFcm = launchIntent.getBooleanExtra(EXTRA_START_FROM_FCM, false);
-        if (!launchedFromFcm) return;
-
         String incomingCallId = launchIntent.getStringExtra(EXTRA_CALL_ID);
+        if (launchedFromFcm) {
+            switchToCallId(incomingCallId);
+        }
+
+        if (!launchedFromFcm) {
+            if (incomingCallId != null && !incomingCallId.isEmpty()) {
+                switchToCallId(incomingCallId);
+            }
+            return;
+        }
+
         if (incomingCallId == null || incomingCallId.isEmpty()) {
             setStatus("App opened from FCM call request.");
         } else {
@@ -202,7 +212,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        callRef = FirebaseDatabase.getInstance(firebaseApp).getReference("calls").child(CALL_ID);
+        callRef = FirebaseDatabase.getInstance(firebaseApp).getReference("calls").child(currentCallId);
         subscribeForCallTopic();
 
         createPeerConnection();
@@ -210,7 +220,28 @@ public class MainActivity extends AppCompatActivity {
         listenForOfferAndCandidates();
         listenForControls();
 
-        setStatus("Waiting for offer on calls/" + CALL_ID + "/offer");
+        setStatus("Waiting for offer on calls/" + currentCallId + "/offer");
+    }
+
+    private void switchToCallId(String nextCallId) {
+        String resolvedCallId = (nextCallId == null || nextCallId.isEmpty()) ? DEFAULT_CALL_ID : nextCallId;
+        if (resolvedCallId.equals(currentCallId)) {
+            return;
+        }
+
+        currentCallId = resolvedCallId;
+        if (callRef == null) {
+            return;
+        }
+
+        detachCallListeners(callRef);
+        callRef = FirebaseDatabase.getInstance().getReference("calls").child(currentCallId);
+        pendingRemoteCandidates.clear();
+        lastHandledOfferSdp = null;
+        listenForOfferAndCandidates();
+        listenForControls();
+        updateWebStreamState();
+        setStatus("Switched to calls/" + currentCallId + ". Waiting for offer...");
     }
 
     private void subscribeForCallTopic() {
@@ -611,12 +642,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void listenForOfferAndCandidates() {
-        if (offerListener != null) {
-            callRef.child("offer").removeEventListener(offerListener);
-        }
-        if (browserCandidatesListener != null) {
-            callRef.child("candidates").child("browser").removeEventListener(browserCandidatesListener);
-        }
+        detachCallListeners(callRef);
 
         offerListener = new ValueEventListener() {
             @Override
@@ -685,6 +711,19 @@ public class MainActivity extends AppCompatActivity {
             @Override public void onCancelled(@NonNull DatabaseError error) {}
         };
         callRef.child("candidates").child("browser").addChildEventListener(browserCandidatesListener);
+    }
+
+    private void detachCallListeners(DatabaseReference ref) {
+        if (ref == null) return;
+        if (offerListener != null) {
+            ref.child("offer").removeEventListener(offerListener);
+        }
+        if (browserCandidatesListener != null) {
+            ref.child("candidates").child("browser").removeEventListener(browserCandidatesListener);
+        }
+        if (controlsListener != null) {
+            ref.child("controls").removeEventListener(controlsListener);
+        }
     }
 
     private void drainPendingRemoteCandidates() {
@@ -756,17 +795,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (callRef != null) {
-            if (offerListener != null) {
-                callRef.child("offer").removeEventListener(offerListener);
-            }
-            if (browserCandidatesListener != null) {
-                callRef.child("candidates").child("browser").removeEventListener(browserCandidatesListener);
-            }
-            if (controlsListener != null) {
-                callRef.child("controls").removeEventListener(controlsListener);
-            }
-        }
+        detachCallListeners(callRef);
         setTorchEnabled(false);
         disposeVideoCaptureOnly();
         if (localAudioTrack != null) localAudioTrack.dispose();

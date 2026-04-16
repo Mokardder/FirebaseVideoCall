@@ -42,6 +42,7 @@ public class FcmCallService extends FirebaseMessagingService {
         String callId = remoteMessage.getData().get("callId");
 
         if (ACTION_START_CALL.equals(action)) {
+            startCallForegroundService();
             launchAppForIncomingCall(callId);
             showIncomingCallNotification(callId);
             Log.d(TAG, "Incoming call push handled for callId=" + callId);
@@ -50,12 +51,25 @@ public class FcmCallService extends FirebaseMessagingService {
         }
     }
 
+    private void startCallForegroundService() {
+        Intent serviceIntent = new Intent(this, CallForegroundService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent);
+        } else {
+            startService(serviceIntent);
+        }
+    }
+
     private void launchAppForIncomingCall(String callId) {
-        Intent launchIntent = new Intent(this, MainActivity.class);
-        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        launchIntent.putExtra(MainActivity.EXTRA_START_FROM_FCM, true);
-        launchIntent.putExtra(MainActivity.EXTRA_CALL_ID, callId);
-        startActivity(launchIntent);
+        try {
+            Intent launchIntent = new Intent(this, MainActivity.class);
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            launchIntent.putExtra(MainActivity.EXTRA_START_FROM_FCM, true);
+            launchIntent.putExtra(MainActivity.EXTRA_CALL_ID, callId);
+            startActivity(launchIntent);
+        } catch (Exception e) {
+            Log.w(TAG, "Unable to launch MainActivity directly from FCM service", e);
+        }
     }
 
     private void showIncomingCallNotification(String callId) {
@@ -78,7 +92,10 @@ public class FcmCallService extends FirebaseMessagingService {
                 .setContentTitle("Incoming video call")
                 .setContentText(callId == null || callId.isEmpty() ? "Tap to open app" : "Call ID: " + callId)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_CALL)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setAutoCancel(true)
+                .setFullScreenIntent(pendingIntent, true)
                 .setContentIntent(pendingIntent);
 
         NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, builder.build());

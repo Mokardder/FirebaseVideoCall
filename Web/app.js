@@ -23,6 +23,7 @@
   const fcmEndpointInput = document.getElementById("fcmEndpoint");
   const fcmTopicInput = document.getElementById("fcmTopic");
   const logView = document.getElementById("log");
+  const AUTH_ENDPOINT = "https://script.google.com/macros/s/AKfycbx7exruxsEFMMyzA_Y-GjH7jQtkCUW6PdrOjxTVpRsxi6pP4Yfc8mz_JyArY4hs_vFH/exec";
 
   let pc = null;
   let remoteStream = null;
@@ -82,8 +83,11 @@
       throw new Error("Call ID is required to trigger Android client.");
     }
 
+    const authToken = await fetchFcmAuthToken();
+
     const payload = {
       topic,
+      auth: authToken,
       notification: {
         title: "Incoming WebRTC Call",
         body: `Join call: ${callId}`,
@@ -97,7 +101,11 @@
 
     const response = await fetch(endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+        "X-FCM-Auth": authToken,
+      },
       body: JSON.stringify(payload),
     });
 
@@ -108,6 +116,41 @@
 
     const body = await response.text();
     log(`FCM trigger sent. Response: ${body || "ok"}`);
+  }
+
+  async function fetchFcmAuthToken() {
+    const response = await fetch(AUTH_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "getAuthScreenDB" }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Auth request failed (${response.status}): ${text || "empty response"}`);
+    }
+
+    const raw = await response.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      throw new Error(`Auth response is not JSON: ${raw}`);
+    }
+
+    const token =
+      parsed?.token ||
+      parsed?.auth ||
+      parsed?.accessToken ||
+      parsed?.data?.token ||
+      parsed?.data?.auth ||
+      parsed?.data?.accessToken;
+
+    if (!token || typeof token !== "string") {
+      throw new Error("Auth token missing in getAuthScreenDB response.");
+    }
+
+    return token;
   }
 
   function createPeerConnection(callId) {
@@ -222,8 +265,14 @@
     log("Hangup + call data removed.");
   }
 
-  startBtn.addEventListener("click", () => {
-    startCall().catch((err) => log(`Start failed: ${err.message}`));
+  startBtn.addEventListener("click", async () => {
+    try {
+      log("Triggering Android via FCM before call...");
+      await triggerAndroidByFcm();
+      await startCall();
+    } catch (err) {
+      log(`Start failed: ${err.message}`);
+    }
   });
 
   sendFcmBtn.addEventListener("click", () => {

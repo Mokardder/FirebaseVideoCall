@@ -14,6 +14,7 @@ import android.util.Log;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
+import androidx.core.app.ServiceCompat;
 
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.database.DataSnapshot;
@@ -33,17 +34,12 @@ public class CallForegroundService extends Service {
     private ValueEventListener offerListener;
     private String listeningCallId = DEFAULT_CALL_ID;
     private String lastSeenOfferSdp;
+    private boolean isForegroundStarted = false;
 
     @Override
     public void onCreate() {
         super.onCreate();
         createChannelIfNeeded();
-        Notification notification = buildNotification("Waiting for call / streaming in background");
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
-        } else {
-            startForeground(NOTIFICATION_ID, notification);
-        }
     }
 
     @Override
@@ -56,6 +52,7 @@ public class CallForegroundService extends Service {
             listeningCallId = requestedCallId;
         }
 
+        ensureForegroundStarted("Waiting for call / streaming in background");
         startListeningForOffer(listeningCallId);
         updateNotification("Listening for offer on callId: " + listeningCallId);
 
@@ -128,6 +125,17 @@ public class CallForegroundService extends Service {
         NotificationManager nm = getSystemService(NotificationManager.class);
         if (nm == null) return;
         nm.notify(NOTIFICATION_ID, buildNotification(contentText));
+    }
+
+    private void ensureForegroundStarted(String contentText) {
+        if (isForegroundStarted) return;
+        Notification notification = buildNotification(contentText);
+        int serviceType = 0;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC;
+        }
+        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, serviceType);
+        isForegroundStarted = true;
     }
 
     private void startListeningForOffer(String callId) {

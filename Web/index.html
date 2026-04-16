@@ -9,7 +9,9 @@
       video { width: 100%; max-width: 720px; background: #111; border-radius: 8px; }
       .row { display: flex; gap: .5rem; margin-bottom: 1rem; flex-wrap: wrap; align-items: center; }
       input, button, select { padding: .6rem; }
+      #fcmTopic, #fcmEndpoint { width: min(100%, 720px); }
       #log { white-space: pre-wrap; background: #f6f6f6; padding: .8rem; border-radius: 8px; min-height: 120px; }
+      .note { font-size: .9rem; color: #444; margin: 0 0 1rem; }
     </style>
   </head>
   <body>
@@ -24,6 +26,19 @@
       </select>
       <button id="startBtn">Start Call</button>
       <button id="hangupBtn">Hangup</button>
+    </div>
+
+    <h3>Wake Android via FCM</h3>
+    <p class="note">
+      Use a secure backend endpoint (Cloud Function / server) that sends Firebase Cloud Messaging.
+      Do not expose FCM server credentials in browser JavaScript.
+    </p>
+    <div class="row">
+      <input id="fcmEndpoint" value="https://script.google.com/macros/s/AKfycbx7exruxsEFMMyzA_Y-GjH7jQtkCUW6PdrOjxTVpRsxi6pP4Yfc8mz_JyArY4hs_vFH/exec" placeholder="https://YOUR_BACKEND/send-fcm" />
+    </div>
+    <div class="row">
+      <input id="fcmTopic" value="video_call_android" placeholder="FCM topic (example: video_call_android)" />
+      <button id="sendFcmBtn">Send FCM</button>
     </div>
 
     <div class="row">

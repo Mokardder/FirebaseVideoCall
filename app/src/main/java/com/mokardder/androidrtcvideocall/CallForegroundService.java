@@ -61,7 +61,11 @@ public class CallForegroundService extends Service {
         Intent restartServiceIntent = new Intent(getApplicationContext(), CallForegroundService.class);
         restartServiceIntent.setPackage(getPackageName());
         restartServiceIntent.putExtra(EXTRA_LISTEN_CALL_ID, listeningCallId);
-        startService(restartServiceIntent);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(restartServiceIntent);
+        } else {
+            startService(restartServiceIntent);
+        }
         super.onTaskRemoved(rootIntent);
     }
 
@@ -121,21 +125,24 @@ public class CallForegroundService extends Service {
     }
 
     private void startListeningForOffer(String callId) {
-        FirebaseApp app = FirebaseApp.initializeApp(this);
-        if (app == null) {
-            app = FirebaseApp.getInstance();
-        }
-
         if (callRef != null && callRef.getKey() != null && callRef.getKey().equals(callId) && offerListener != null) {
+            Log.d(TAG, "Already listening on callId=" + callId);
             return;
         }
 
         stopListeningForOffer();
-        callRef = FirebaseDatabase.getInstance(app).getReference("calls").child(callId);
+        if (FirebaseApp.getApps(this).isEmpty()) {
+            FirebaseApp.initializeApp(this);
+        }
+        callRef = FirebaseDatabase.getInstance().getReference("calls").child(callId);
+        Log.d(TAG, "Started listening for offer on calls/" + callId + "/offer");
         offerListener = new ValueEventListener() {
             @Override
             public void onDataChange(DataSnapshot snapshot) {
-                if (!snapshot.exists()) return;
+                if (!snapshot.exists()) {
+                    Log.d(TAG, "No offer currently for callId=" + listeningCallId);
+                    return;
+                }
 
                 String type = snapshot.child("type").getValue(String.class);
                 String sdp = snapshot.child("sdp").getValue(String.class);
@@ -159,6 +166,7 @@ public class CallForegroundService extends Service {
     private void stopListeningForOffer() {
         if (callRef != null && offerListener != null) {
             callRef.child("offer").removeEventListener(offerListener);
+            Log.d(TAG, "Stopped listening for offer on callId=" + listeningCallId);
         }
         offerListener = null;
         callRef = null;

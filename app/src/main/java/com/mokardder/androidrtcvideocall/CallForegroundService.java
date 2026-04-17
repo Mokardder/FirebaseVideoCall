@@ -52,7 +52,11 @@ public class CallForegroundService extends Service {
             listeningCallId = requestedCallId;
         }
 
-        ensureForegroundStarted("Waiting for call / streaming in background");
+        if (!ensureForegroundStarted("Waiting for call / streaming in background")) {
+            Log.e(TAG, "Failed to start foreground mode; stopping service to avoid crash loop.");
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         startListeningForOffer(listeningCallId);
         updateNotification("Listening for offer on callId: " + listeningCallId);
 
@@ -127,15 +131,31 @@ public class CallForegroundService extends Service {
         nm.notify(NOTIFICATION_ID, buildNotification(contentText));
     }
 
-    private void ensureForegroundStarted(String contentText) {
-        if (isForegroundStarted) return;
+    private boolean ensureForegroundStarted(String contentText) {
+        if (isForegroundStarted) return true;
         Notification notification = buildNotification(contentText);
         int serviceType = 0;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC;
         }
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, serviceType);
-        isForegroundStarted = true;
+        try {
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, serviceType);
+            isForegroundStarted = true;
+            return true;
+        } catch (IllegalArgumentException typeMismatch) {
+            Log.w(TAG, "FGS type mismatch; retrying startForeground without explicit type.", typeMismatch);
+            try {
+                ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, 0);
+                isForegroundStarted = true;
+                return true;
+            } catch (RuntimeException fallbackError) {
+                Log.e(TAG, "Fallback foreground start failed.", fallbackError);
+                return false;
+            }
+        } catch (RuntimeException e) {
+            Log.e(TAG, "Foreground start failed.", e);
+            return false;
+        }
     }
 
     private void startListeningForOffer(String callId) {

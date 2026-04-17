@@ -231,6 +231,7 @@ public class MainActivity extends AppCompatActivity {
         listenForOfferAndCandidates();
         listenForControls();
         updateWebStreamState();
+        startCallService();
         setStatus("Switched to calls/" + currentCallId + ". Waiting for offer...");
     }
 
@@ -712,6 +713,8 @@ public class MainActivity extends AppCompatActivity {
 
     private void startCallService() {
         Intent intent = new Intent(this, CallForegroundService.class);
+        intent.putExtra(CallForegroundService.EXTRA_LISTEN_CALL_ID, currentCallId);
+        intent.putExtra(CallForegroundService.EXTRA_FOREGROUND_MODE, CallForegroundService.FOREGROUND_MODE_MEDIA);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent);
         } else {

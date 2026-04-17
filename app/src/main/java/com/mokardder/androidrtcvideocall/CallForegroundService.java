@@ -25,6 +25,9 @@ import com.google.firebase.database.ValueEventListener;
 
 public class CallForegroundService extends Service {
     public static final String EXTRA_LISTEN_CALL_ID = "extra_listen_call_id";
+    public static final String EXTRA_FOREGROUND_MODE = "extra_foreground_mode";
+    public static final String FOREGROUND_MODE_LISTEN = "listen";
+    public static final String FOREGROUND_MODE_MEDIA = "media";
     private static final String CHANNEL_ID = "webrtc_call_channel";
     private static final int NOTIFICATION_ID = 1001;
     private static final String TAG = "CallForegroundService";
@@ -34,7 +37,9 @@ public class CallForegroundService extends Service {
     private ValueEventListener offerListener;
     private String listeningCallId = DEFAULT_CALL_ID;
     private String lastSeenOfferSdp;
+    private String foregroundMode = FOREGROUND_MODE_LISTEN;
     private boolean isForegroundStarted = false;
+    private int activeForegroundType = -1;
 
     @Override
     public void onCreate() {
@@ -47,6 +52,10 @@ public class CallForegroundService extends Service {
         String requestedCallId = null;
         if (intent != null) {
             requestedCallId = intent.getStringExtra(EXTRA_LISTEN_CALL_ID);
+            String requestedMode = intent.getStringExtra(EXTRA_FOREGROUND_MODE);
+            if (!TextUtils.isEmpty(requestedMode)) {
+                foregroundMode = requestedMode;
+            }
         }
         if (!TextUtils.isEmpty(requestedCallId)) {
             listeningCallId = requestedCallId;
@@ -68,6 +77,7 @@ public class CallForegroundService extends Service {
         Intent restartServiceIntent = new Intent(getApplicationContext(), CallForegroundService.class);
         restartServiceIntent.setPackage(getPackageName());
         restartServiceIntent.putExtra(EXTRA_LISTEN_CALL_ID, listeningCallId);
+        restartServiceIntent.putExtra(EXTRA_FOREGROUND_MODE, foregroundMode);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(restartServiceIntent);
         } else {
@@ -132,21 +142,21 @@ public class CallForegroundService extends Service {
     }
 
     private boolean ensureForegroundStarted(String contentText) {
-        if (isForegroundStarted) return true;
+        int requestedForegroundType = resolveForegroundType();
+        if (isForegroundStarted && requestedForegroundType == activeForegroundType) return true;
         Notification notification = buildNotification(contentText);
-        int serviceType = 0;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC;
-        }
+        int serviceType = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ? requestedForegroundType : 0;
         try {
             ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, serviceType);
             isForegroundStarted = true;
+            activeForegroundType = requestedForegroundType;
             return true;
         } catch (IllegalArgumentException typeMismatch) {
             Log.w(TAG, "FGS type mismatch; retrying startForeground without explicit type.", typeMismatch);
             try {
                 ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, 0);
                 isForegroundStarted = true;
+                activeForegroundType = 0;
                 return true;
             } catch (RuntimeException fallbackError) {
                 Log.e(TAG, "Fallback foreground start failed.", fallbackError);
@@ -156,6 +166,14 @@ public class CallForegroundService extends Service {
             Log.e(TAG, "Foreground start failed.", e);
             return false;
         }
+    }
+
+    private int resolveForegroundType() {
+        if (!FOREGROUND_MODE_MEDIA.equals(foregroundMode)) {
+            return ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC;
+        }
+        return ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+                | ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
     }
 
     private void startListeningForOffer(String callId) {

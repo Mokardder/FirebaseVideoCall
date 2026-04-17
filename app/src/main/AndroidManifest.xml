@@ -36,7 +36,7 @@
             android:enabled="true"
             android:exported="false"
             android:stopWithTask="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="dataSync|camera|microphone|mediaProjection" />
         <service
             android:name=".FcmCallService"
             android:enabled="true"

@@ -57,6 +57,7 @@ public class FcmCallService extends FirebaseMessagingService {
     private void startCallForegroundService(String callId) {
         Intent serviceIntent = new Intent(this, CallForegroundService.class);
         serviceIntent.putExtra(CallForegroundService.EXTRA_LISTEN_CALL_ID, callId);
+        serviceIntent.putExtra(CallForegroundService.EXTRA_FOREGROUND_MODE, CallForegroundService.FOREGROUND_MODE_LISTEN);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(serviceIntent);
         } else {

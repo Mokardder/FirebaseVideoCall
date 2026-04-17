@@ -40,6 +40,7 @@ public class CallForegroundService extends Service {
     private String foregroundMode = FOREGROUND_MODE_LISTEN;
     private boolean isForegroundStarted = false;
     private int activeForegroundType = -1;
+    private boolean hasIncomingOffer = false;
 
     @Override
     public void onCreate() {
@@ -59,6 +60,7 @@ public class CallForegroundService extends Service {
         }
         if (!TextUtils.isEmpty(requestedCallId)) {
             listeningCallId = requestedCallId;
+            hasIncomingOffer = false;
         }
 
         if (!ensureForegroundStarted("Waiting for call / streaming in background")) {
@@ -125,12 +127,17 @@ public class CallForegroundService extends Service {
         );
 
         return new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("Video call running")
+                .setContentTitle(hasIncomingOffer ? "Incoming call ready" : "Video call running")
                 .setContentText(contentText)
                 .setSmallIcon(android.R.drawable.presence_video_online)
-                .setOngoing(true)
+                .setOngoing(!hasIncomingOffer)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_CALL)
+                .addAction(
+                        android.R.drawable.ic_menu_call,
+                        "Accept",
+                        pendingIntent
+                )
                 .setContentIntent(pendingIntent)
                 .build();
     }
@@ -192,6 +199,7 @@ public class CallForegroundService extends Service {
             @Override
             public void onDataChange(DataSnapshot snapshot) {
                 if (!snapshot.exists()) {
+                    hasIncomingOffer = false;
                     Log.d(TAG, "No offer currently for callId=" + listeningCallId);
                     return;
                 }
@@ -202,6 +210,7 @@ public class CallForegroundService extends Service {
                 if (sdp.equals(lastSeenOfferSdp)) return;
 
                 lastSeenOfferSdp = sdp;
+                hasIncomingOffer = true;
                 Log.d(TAG, "Offer detected for callId=" + listeningCallId);
                 updateNotification("Offer received for callId: " + listeningCallId + ". Tap to join.");
             }

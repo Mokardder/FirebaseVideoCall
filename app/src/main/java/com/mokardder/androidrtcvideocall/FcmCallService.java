@@ -89,6 +89,7 @@ public class FcmCallService extends FirebaseMessagingService {
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setAutoCancel(true)
                 .setFullScreenIntent(pendingIntent, true)
+                .addAction(android.R.drawable.ic_menu_call, "Accept", pendingIntent)
                 .setContentIntent(pendingIntent);
 
         NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, builder.build());

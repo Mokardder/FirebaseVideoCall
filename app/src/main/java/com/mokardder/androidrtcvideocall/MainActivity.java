@@ -37,8 +37,6 @@ import org.webrtc.FlashlightCameraCapturer;
 import org.webrtc.FlashlightCameraEnumerator;
 import org.webrtc.CameraEnumerator;
 import org.webrtc.CameraVideoCapturer;
-import org.webrtc.DefaultVideoDecoderFactory;
-import org.webrtc.DefaultVideoEncoderFactory;
 import org.webrtc.EglBase;
 import org.webrtc.IceCandidate;
 import org.webrtc.MediaConstraints;
@@ -75,6 +73,7 @@ public class MainActivity extends AppCompatActivity {
     private PeerConnectionFactory factory;
     private PeerConnection peerConnection;
     private EglBase eglBase;
+    private WebRtcEngine webRtcEngine;
     private DatabaseReference callRef;
     private String currentCallId = DEFAULT_CALL_ID;
 
@@ -196,15 +195,10 @@ public class MainActivity extends AppCompatActivity {
         acquireWakeLock();
         mediaProjectionManager = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
         setStatus("Initializing WebRTC...");
-        PeerConnectionFactory.initialize(
-                PeerConnectionFactory.InitializationOptions.builder(this)
-                        .createInitializationOptions());
-
-        eglBase = EglBase.create();
-        factory = PeerConnectionFactory.builder()
-                .setVideoEncoderFactory(new DefaultVideoEncoderFactory(eglBase.getEglBaseContext(), true, true))
-                .setVideoDecoderFactory(new DefaultVideoDecoderFactory(eglBase.getEglBaseContext()))
-                .createPeerConnectionFactory();
+        webRtcEngine = new WebRtcEngine(this);
+        webRtcEngine.initialize();
+        eglBase = webRtcEngine.getEglBase();
+        factory = webRtcEngine.getPeerConnectionFactory();
 
         FirebaseApp firebaseApp = FirebaseApp.initializeApp(this);
         if (firebaseApp == null) {
@@ -262,29 +256,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void createPeerConnection() {
-        List<PeerConnection.IceServer> servers = new ArrayList<>();
-        servers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
-        servers.add(PeerConnection.IceServer.builder("turn:a.relay.metered.ca:3478?transport=udp")
-                .setUsername("83eebabf8b4cce9d5dbcb649")
-                .setPassword("2D7JvfkOQtBdYW3R")
-                .createIceServer());
-        servers.add(PeerConnection.IceServer.builder("turn:a.relay.metered.ca:3478?transport=tcp")
-                .setUsername("83eebabf8b4cce9d5dbcb649")
-                .setPassword("2D7JvfkOQtBdYW3R")
-                .createIceServer());
-        servers.add(PeerConnection.IceServer.builder("turn:a.relay.metered.ca:443?transport=tcp")
-                .setUsername("83eebabf8b4cce9d5dbcb649")
-                .setPassword("2D7JvfkOQtBdYW3R")
-                .createIceServer());
-        servers.add(PeerConnection.IceServer.builder("turns:a.relay.metered.ca:5349?transport=tcp")
-                .setUsername("83eebabf8b4cce9d5dbcb649")
-                .setPassword("2D7JvfkOQtBdYW3R")
-                .createIceServer());
-
-        PeerConnection.RTCConfiguration config = new PeerConnection.RTCConfiguration(servers);
-        config.iceTransportsType = PeerConnection.IceTransportsType.ALL;
-
-        peerConnection = factory.createPeerConnection(config, new PeerConnection.Observer() {
+        if (webRtcEngine == null) {
+            setStatus("WebRTC engine is not initialized.");
+            return;
+        }
+        peerConnection = webRtcEngine.createPeerConnection(new PeerConnection.Observer() {
             @Override
             public void onSignalingChange(PeerConnection.SignalingState signalingState) {}
 
@@ -801,8 +777,7 @@ public class MainActivity extends AppCompatActivity {
         if (localAudioTrack != null) localAudioTrack.dispose();
         if (audioSource != null) audioSource.dispose();
         if (peerConnection != null) peerConnection.close();
-        if (factory != null) factory.dispose();
-        if (eglBase != null) eglBase.release();
+        if (webRtcEngine != null) webRtcEngine.dispose();
         releaseWakeLock();
         stopCallService();
     }
